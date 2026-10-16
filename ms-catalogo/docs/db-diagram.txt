@@ -1,0 +1,50 @@
+Table categorias{
+  id int [primary key]
+  nombre varchar(100) [not null]
+  descripcion varchar(255) [null]
+  categoria_padre_id int [null]
+  activo boolean [default: true]
+}
+
+Table unidades_medida{
+  id int [primary key]
+  codigo varchar(10) [unique]
+  nombre varchar(50) [not null]
+}
+
+Table productos{
+  id int [primary key]
+  codigo varchar(10) [unique]
+  nombre varchar(150) [not null]
+  descripcion text [null]
+  categoria_id int
+  unidad_medida_id int
+  precio_venta decimal(14,2) [not null]
+  costo decimal(14,2) [not null]
+  es_perecedero boolean [default: false]
+  activo boolean [default: true]
+}
+
+Table proveedores{
+  id int [primary key]
+  nit varchar(20) [unique]
+  razon_social varchar(150) [not null]
+  telefono varchar(20)
+  email varchar(100)
+  ciudad varchar(80)
+  activo boolean [default: true]
+}
+
+Table producto_proveedor {
+  producto_id int
+  proveedor_id int
+  precio_compra decimal(14,2)
+  es_principal boolean
+}
+
+//Relaciones entre tablas
+Ref: categorias.id ?< categorias.categoria_padre_id
+Ref: categorias.id ?< productos.categoria_id
+Ref: unidades_medida.id ?< productos.unidad_medida_id
+Ref: productos.id ?< producto_proveedor.producto_id
+Ref: proveedores.id ?< producto_proveedor.proveedor_id
