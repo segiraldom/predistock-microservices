@@ -1,0 +1,126 @@
+table bodegas {
+  id int [primary key]
+  codigo varchar(20) [unique]
+  nonmbre varchar(100) [not null]
+  region varchar(50) [not null]
+  ciudad varchar(80)
+  activa boolean [default: true]
+}
+
+table productos_referencia {
+  producto_id int [primary key]
+  codigo varchar(30)
+  nombre varchar(150)
+  es_perecedero boolean
+  activo boolean
+  actualizado_en datetime
+}
+
+table existencias {
+  id int [primary key]
+  producto_id int
+  bodega_id int
+  cantidad decimal(14,3) [note: ">=0"]
+  stock_minimo decimal(14,3)
+  stock_maximo decimal(14,3) [null]
+}
+
+table lotes {
+  id int [primary key]
+  producto_id int
+  bodega_id int
+  numero_lote varchar(30)
+  fecha_vencimiento date [not null]
+  cantidad decimal(14,3) [note: ">=0"]
+}
+
+table movimientos {
+  id bigint [primary key]
+  producto_id int
+  bodega_id int
+  lote_id int [null]
+  tipo varchar(20) [not null]
+  cantidad decimal(14,3) [note: ">=0"]
+  saldo_resultante decimal(14,3)
+  orden_compra_id int [null]
+  traslado_id int [null]
+  devoluvion_id int [null]
+  usuario_id int [null]
+  motivo varchar(255) [null]
+  fecha datetime [not null]
+}
+
+table ordenes_compra {
+  id int [primary key]
+  numero varchar(20) [unique]
+  proveedor_id int [note: "catalogo"]
+  bodega_id int
+  estado varchar(15)
+  fecha_emision date
+  creada_por int [note: "usuarios"]
+}
+
+table detalle_orden_compra {
+  id int [primary key]
+  orden_compra_id int
+  producto_id int
+  cantidad_solicitada decimal(14,3)
+  cantidad_recibida decimal(14,3) [default: 0]
+  precio_unitario decimal(14,2)
+}
+
+table traslados {
+  id int [primary key]
+  bodega_origen_id int
+  bodega_destino_id int
+  sugerencia_id int [null, note: "analitica"]
+  usuario_id int [null]
+  fecha datetime
+}
+
+table detalle_traslado {
+  id int [primary key]
+  traslado_id int
+  producto_id int
+  cantidad decimal(14,3)
+}
+
+table devoluciones {
+  id int [primary key]
+  tipo varchar(10)
+  bodega_id int
+  proveedor_id int [null]
+  referencia_cliente int [null]
+  motivo varchar(255)
+  usuario_id int [note: "usuarios"]
+  fecha datetime
+}
+
+table detalle_devolucion {
+  id int [primary key]
+  devolucion_id int
+  producto_id int
+  cantidad decimal(14,3)
+  condicion varchar(10)
+}
+
+ref: bodegas.id <? existencias.bodega_id
+ref: bodegas.id <? lotes.bodega_id
+ref: bodegas.id <? movimientos.bodega_id
+ref: bodegas.id <? ordenes_compra.bodega_id
+ref: bodegas.id <? devoluciones.bodega_id
+ref: bodegas.id <? traslados.bodega_destino_id
+ref: bodegas.id <? traslados.bodega_origen_id
+ref: productos_referencia.producto_id <? existencias.producto_id
+ref: productos_referencia.producto_id <? lotes.producto_id
+ref: productos_referencia.producto_id <? movimientos.producto_id
+ref: productos_referencia.producto_id <? detalle_devolucion.producto_id
+ref: productos_referencia.producto_id <? detalle_orden_compra.producto_id
+ref: productos_referencia.producto_id <? detalle_traslado.producto_id
+ref: lotes.id <? movimientos.lote_id
+ref: ordenes_compra.id <? detalle_orden_compra.orden_compra_id
+ref: traslados.id <? detalle_traslado.traslado_id
+ref: devoluciones.id <? detalle_devolucion.devolucion_id
+ref: ordenes_compra.id <? movimientos.orden_compra_id
+ref: traslados.id <? movimientos.traslado_id
+ref: devoluciones.id <? movimientos.devoluvion_id
