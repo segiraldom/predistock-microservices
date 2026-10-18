@@ -1,0 +1,8 @@
+Table notifications {
+  id int [pk, increment]
+  notification_type varchar(50) [not null, note: 'Ej: quiebre_inminente, sobrestock']
+  product_id int [not null, note: 'Referencia lógica al microservicio de Catálogo']
+  warehouse_id int [not null, note: 'Referencia lógica al microservicio de Inventario']
+  description text [not null, note: 'Mensaje descriptivo de la alerta']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`, note: 'Fecha y hora en que se generó la alerta']
+}

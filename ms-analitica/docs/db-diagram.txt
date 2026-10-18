@@ -1,0 +1,44 @@
+Table trained_models {
+  id int [pk, increment]
+  model_type varchar(50) [not null, note: 'Ej: kmeans_segmentation, random_forest_demand']
+  version varchar(20) [not null]
+  file_path varchar(255) [not null, note: 'Ruta del archivo .pkl o joblib en el volumen persistente (PVC)']
+  metrics json [note: 'Métricas de rendimiento del modelo (ej: R2, Silhouette)']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+Table inventory_segmentation {
+  id int [pk, increment]
+  model_id int [not null, note: 'FK al modelo K-Means que generó esta segmentación']
+  product_id int [not null, note: 'Referencia lógica al microservicio de Catálogo']
+  warehouse_id int [not null, note: 'Referencia lógica al microservicio de Inventario']
+  cluster_group int [not null, note: 'Grupo de rotación asignado por K-Means']
+  updated_at timestamp
+}
+
+
+Table demand_predictions {
+  id int [pk, increment]
+  model_id int [not null, note: 'FK al modelo Random Forest que generó esta predicción']
+  product_id int [not null, note: 'Referencia lógica al microservicio de Catálogo']
+  warehouse_id int [not null, note: 'Referencia lógica al microservicio de Inventario']
+  predicted_demand float [not null, note: 'Demanda futura estimada por Random Forest']
+  target_period date [not null, note: 'Mes o semana analizada']
+  generated_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+
+Table stock_suggestions {
+  id int [pk, increment]
+  model_id int [not null, note: 'FK al modelo que sirvió de base para esta sugerencia']
+  product_id int [not null, note: 'Referencia lógica al microservicio de Catálogo']
+  warehouse_id int [not null, note: 'Referencia lógica al microservicio de Inventario']
+  optimal_stock int [not null, note: 'Cantidad sugerida para evitar quiebres o sobrestock']
+  status varchar(50) [not null, note: 'Estado: Pendiente, Aplicado']
+  created_at timestamp [default: `CURRENT_TIMESTAMP`]
+}
+
+
+// Definición de relaciones (Líneas conectoras en el diagrama)
+Ref: inventory_segmentation.model_id > trained_models.id
+Ref: demand_predictions.model_id > trained_models.id
+Ref: stock_suggestions.model_id > trained_models.id

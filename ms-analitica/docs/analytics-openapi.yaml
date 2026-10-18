@@ -1,0 +1,279 @@
+openapi: 3.0.3
+info:
+  title: "PrediStock - Microservicio de Analítica y Minería de Datos"
+  version: "1.0.0"
+  description: |
+    API del microservicio de analítica encargada de la ejecución del pipeline de minería de datos (RFM_01 a RFM_07), 
+    segmentación de inventario mediante K-Means y proyección de demanda futura con Random Forest.
+    
+    ### Capacidades del Servicio:
+    * **Pipeline Automatizado**: Limpieza, escalamiento, entrenamiento y persistencia en PVC.
+    * **Segmentación de Rotación**: Clasificación de artículos por frecuencia de venta por bodega.
+    * **Predicción de Demanda**: Regresión basada en histórico de ventas por zona/bodega.
+    * **Métricas y Alertas de Stock**: Cálculo de quiebres de stock y sugerencias de rebalanceo.
+
+servers:
+  - url: "http://localhost:5000/api/analytics"
+    description: "Entorno local / Contenedor directo"
+  - url: "http://api.predistock.local/api/analytics"
+    description: "Acceso a través de API Gateway (Laravel)"
+
+tags:
+  - name: "Pipeline de Minería"
+    description: "Orquestación del entrenamiento y ejecución de modelos"
+  - name: "Segmentación (K-Means)"
+    description: "Análisis de rotación de existencias"
+  - name: "Predicciones (Random Forest)"
+    description: "Proyecciones de demanda futura"
+  - name: "Dashboard & Indicadores"
+    description: "Sugerencias y KPIs consolidados"
+
+paths:
+  /pipeline/run:
+    post:
+      tags:
+        - "Pipeline de Minería"
+      summary: "Ejecuta el pipeline completo de minería de datos"
+      description: |
+        Activa los procesos de extracción desde el MS de Inventario, limpieza de ruido, 
+        normalización de variables y ajuste de hiperparámetros para K-Means y Random Forest. 
+        Los modelos válidos (R2 > 0.70) se serializan en el volumen persistente montado en /app/models.
+      responses:
+        '200':
+          description: "Pipeline ejecutado y modelos actualizados exitosamente"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/PipelineRunResult'
+        '422':
+          description: "El modelo entrenado no cumplió con la métrica mínima aceptable (RNFM_03: R2 > 0.70)"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '500':
+          description: "Error interno al procesar los conjuntos de datos"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /segmentation:
+    get:
+      tags:
+        - "Segmentación (K-Means)"
+      summary: "Clasificación de productos según su rotación de venta"
+      description: "Retorna la pertenencia a clústeres calculada por K-Means para los artículos del inventario."
+      parameters:
+        - name: "warehouse_id"
+          in: "query"
+          description: "Filtrar por identificador de bodega específica"
+          required: false
+          schema:
+            type: "integer"
+            example: 1
+      responses:
+        '200':
+          description: "Listado de segmentaciones por producto y bodega"
+          content:
+            application/json:
+              schema:
+                type: "array"
+                items:
+                  $ref: '#/components/schemas/InventorySegmentation'
+
+  /predictions:
+    get:
+      tags:
+        - "Predicciones (Random Forest)"
+      summary: "Predicción de demanda futura por producto y bodega"
+      description: "Consulta el pronóstico calculado mediante regresión de Random Forest para un artículo en una ubicación específica."
+      parameters:
+        - name: "product_id"
+          in: "query"
+          required: true
+          description: "ID único del producto"
+          schema:
+            type: "integer"
+            example: 105
+        - name: "warehouse_id"
+          in: "query"
+          required: true
+          description: "ID de la bodega regional a consultar"
+          schema:
+            type: "integer"
+            example: 2
+      responses:
+        '200':
+          description: "Demanda proyectada calculada para el siguiente periodo"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DemandPrediction'
+        '404':
+          description: "No existen proyecciones registradas para los parámetros solicitados"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /dashboard/indicators:
+    get:
+      tags:
+        - "Dashboard & Indicadores"
+      summary: "Indicadores clave y recomendaciones de abastecimiento"
+      description: "Devuelve métricas de artículos de baja rotación, riesgos inminentes de quiebre de stock y balanceo óptimo."
+      responses:
+        '200':
+          description: "Resumen general para la interfaz del dashboard"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardIndicators'
+
+components:
+  schemas:
+    PipelineRunResult:
+      type: "object"
+      properties:
+        status:
+          type: "string"
+          example: "success"
+        execution_time_seconds:
+          type: "number"
+          example: 14.82
+        models_trained:
+          type: "array"
+          items:
+            $ref: '#/components/schemas/TrainedModel'
+
+    TrainedModel:
+      type: "object"
+      properties:
+        id:
+          type: "integer"
+          example: 1
+        model_type:
+          type: "string"
+          example: "RandomForestRegressor"
+        version:
+          type: "string"
+          example: "v1.2.0"
+        file_path:
+          type: "string"
+          example: "/app/models/rf_demand_20261017.joblib"
+        metrics:
+          type: "object"
+          properties:
+            r2_score:
+              type: "number"
+              example: 0.784
+            rmse:
+              type: "number"
+              example: 8.42
+        created_at:
+          type: "string"
+          format: "date-time"
+          example: "2026-10-17T18:30:00Z"
+
+    InventorySegmentation:
+      type: "object"
+      properties:
+        id:
+          type: "integer"
+          example: 45
+        model_id:
+          type: "integer"
+          example: 1
+        product_id:
+          type: "integer"
+          example: 201
+        warehouse_id:
+          type: "integer"
+          example: 1
+        cluster_group:
+          type: "integer"
+          description: "0 = Baja rotación, 1 = Media, 2 = Alta rotación"
+          example: 0
+        updated_at:
+          type: "string"
+          format: "date-time"
+          example: "2026-10-17T18:32:00Z"
+
+    DemandPrediction:
+      type: "object"
+      properties:
+        id:
+          type: "integer"
+          example: 12
+        model_id:
+          type: "integer"
+          example: 1
+        product_id:
+          type: "integer"
+          example: 105
+        warehouse_id:
+          type: "integer"
+          example: 2
+        predicted_demand:
+          type: "number"
+          format: "float"
+          example: 320.5
+        target_period:
+          type: "string"
+          format: "date"
+          example: "2026-11-01"
+        generated_at:
+          type: "string"
+          format: "date-time"
+          example: "2026-10-17T18:32:00Z"
+
+    StockSuggestion:
+      type: "object"
+      properties:
+        id:
+          type: "integer"
+          example: 8
+        model_id:
+          type: "integer"
+          example: 1
+        product_id:
+          type: "integer"
+          example: 105
+        warehouse_id:
+          type: "integer"
+          example: 2
+        optimal_stock:
+          type: "integer"
+          example: 400
+        status:
+          type: "string"
+          example: "reabastecer"
+        created_at:
+          type: "string"
+          format: "date-time"
+          example: "2026-10-17T18:32:00Z"
+
+    DashboardIndicators:
+      type: "object"
+      properties:
+        dead_stock_risk_count:
+          type: "integer"
+          example: 14
+        stock_out_warnings:
+          type: "integer"
+          example: 3
+        suggestions:
+          type: "array"
+          items:
+            $ref: '#/components/schemas/StockSuggestion'
+
+    ErrorResponse:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "ModelTrainingError"
+        message:
+          type: "string"
+          example: "El modelo Random Forest no superó el umbral R^2 mínimo aceptable (0.70)."
