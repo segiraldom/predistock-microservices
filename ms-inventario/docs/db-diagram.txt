@@ -7,18 +7,9 @@ table bodegas {
   activa boolean [default: true]
 }
 
-table productos_referencia {
-  producto_id int [primary key]
-  codigo varchar(30)
-  nombre varchar(150)
-  es_perecedero boolean
-  activo boolean
-  actualizado_en datetime
-}
-
 table existencias {
   id int [primary key]
-  producto_id int
+  producto_id int [note: "referencia catálogo"]
   bodega_id int
   cantidad decimal(14,3) [note: ">=0"]
   stock_minimo decimal(14,3)
@@ -27,7 +18,7 @@ table existencias {
 
 table lotes {
   id int [primary key]
-  producto_id int
+  producto_id int [note: "referencia catálogo"]
   bodega_id int
   numero_lote varchar(30)
   fecha_vencimiento date [not null]
@@ -36,7 +27,7 @@ table lotes {
 
 table movimientos {
   id bigint [primary key]
-  producto_id int
+  producto_id int [note: "referencia catálogo"]
   bodega_id int
   lote_id int [null]
   tipo varchar(20) [not null]
@@ -45,7 +36,7 @@ table movimientos {
   orden_compra_id int [null]
   traslado_id int [null]
   devoluvion_id int [null]
-  usuario_id int [null]
+  usuario_id int [null, note: "Referencia a usuario"]
   motivo varchar(255) [null]
   fecha datetime [not null]
 }
@@ -111,12 +102,6 @@ ref: bodegas.id <? ordenes_compra.bodega_id
 ref: bodegas.id <? devoluciones.bodega_id
 ref: bodegas.id <? traslados.bodega_destino_id
 ref: bodegas.id <? traslados.bodega_origen_id
-ref: productos_referencia.producto_id <? existencias.producto_id
-ref: productos_referencia.producto_id <? lotes.producto_id
-ref: productos_referencia.producto_id <? movimientos.producto_id
-ref: productos_referencia.producto_id <? detalle_devolucion.producto_id
-ref: productos_referencia.producto_id <? detalle_orden_compra.producto_id
-ref: productos_referencia.producto_id <? detalle_traslado.producto_id
 ref: lotes.id <? movimientos.lote_id
 ref: ordenes_compra.id <? detalle_orden_compra.orden_compra_id
 ref: traslados.id <? detalle_traslado.traslado_id
