@@ -1,0 +1,118 @@
+openapi: 3.0.3
+info:
+  title: "PrediStock - Microservicio de Notificaciones y Alertas"
+  version: "1.0.0"
+  description: |
+    API del microservicio de notificaciones operativas de PrediStock.
+    Recibe eventos en tiempo real disparados por caída de stock bajo el umbral mínimo (RF09) y los retransmite a los clientes y bodegueros.
+    
+    ### Características de la Arquitectura:
+    - **Stateless**: No requiere base de datos ni volumen de almacenamiento persistente montado en Pods.
+    - **Desacoplado**: Actúa como un despachador de eventos (Event Dispatcher / Bridge) en tiempo real.
+    - **ClusterIP**: Aislado del tráfico externo directo, consumible internamente por el microservicio de Existencias y el API Gateway.
+
+
+servers:
+  - url: "http://localhost:5001/api/notifications"
+    description: "Entorno local / Contenedor directo"
+  - url: "http://api.predistock.local/api/notifications"
+    description: "Enrutado vía API Gateway (Laravel)"
+
+
+tags:
+  - name: "Notificaciones"
+    description: "Despacho y transmisión de alertas de existencias en tiempo real"
+
+
+paths:
+  /notifications/alerts:
+    post:
+      tags:
+        - "Notificaciones"
+      summary: "Despacha una alerta de existencias (Uso interno)"
+      description: "Endpoint invocado internamente por el microservicio de Existencias cuando el stock baja de su umbral configurado. El servicio procesa el payload y lo retransmite en tiempo real."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockAlertPayload'
+      responses:
+        '200':
+          description: "Alerta procesada y despachada exitosamente a los destinatarios"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DispatchResult'
+        '400':
+          description: "Estructura de la alerta inválida o incompleta"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+
+components:
+  schemas:
+    StockAlertPayload:
+      type: "object"
+      required:
+        - "alert_type"
+        - "product_id"
+        - "warehouse_id"
+        - "current_stock"
+        - "threshold"
+        - "message"
+      properties:
+        alert_type:
+          type: "string"
+          example: "LOW_STOCK_THRESHOLD"
+        product_id:
+          type: "integer"
+          description: "Identificador del producto afectado"
+          example: 104
+        warehouse_id:
+          type: "integer"
+          description: "Identificador de la bodega asociada"
+          example: 1
+        current_stock:
+          type: "integer"
+          description: "Cantidad actual en bodega"
+          example: 4
+        threshold:
+          type: "integer"
+          description: "Umbral mínimo configurado que detonó la alerta"
+          example: 10
+        message:
+          type: "string"
+          description: "Texto informativo de la alerta"
+          example: "Stock crítico: quedan 4 unidades disponibles en Bodega Central."
+
+
+    DispatchResult:
+      type: "object"
+      properties:
+        status:
+          type: "string"
+          example: "delivered"
+        channel:
+          type: "string"
+          example: "realtime_push"
+        timestamp:
+          type: "string"
+          format: "date-time"
+          example: "2026-10-24T17:25:00Z"
+
+
+    ErrorResponse:
+      type: "object"
+      properties:
+        error:
+          type: "string"
+          example: "BadRequest"
+        message:
+          type: "string"
+          example: "Faltan campos obligatorios para procesar el despacho de la alerta."
+
+
+

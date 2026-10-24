@@ -3,20 +3,22 @@ info:
   title: "PrediStock - Microservicio de Analítica y Minería de Datos"
   version: "1.0.0"
   description: |
-    API del microservicio de analítica encargada de la ejecución del pipeline de minería de datos (RFM_01 a RFM_07), 
-    segmentación de inventario mediante K-Means y proyección de demanda futura con Random Forest.
-    
+    API del microservicio de analítica encargada de la ejecución del pipeline de minería de datos (RFM_01 a RFM_07),
+    segmentación de existencias mediante K-Means y proyección de demanda futura con Random Forest.
+   
     ### Capacidades del Servicio:
-    * **Pipeline Automatizado**: Limpieza, escalamiento, entrenamiento y persistencia en PVC.
+    * **Pipeline Automatizado**: Limpieza, escalamiento, entrenamiento y persistencia en PVC (/app/models).
     * **Segmentación de Rotación**: Clasificación de artículos por frecuencia de venta por bodega.
     * **Predicción de Demanda**: Regresión basada en histórico de ventas por zona/bodega.
-    * **Métricas y Alertas de Stock**: Cálculo de quiebres de stock y sugerencias de rebalanceo.
+    * **Métricas e Indicadores**: Cálculo de riesgos de quiebre y sugerencias de rebalanceo óptimo.
+
 
 servers:
   - url: "http://localhost:5000/api/analytics"
     description: "Entorno local / Contenedor directo"
   - url: "http://api.predistock.local/api/analytics"
     description: "Acceso a través de API Gateway (Laravel)"
+
 
 tags:
   - name: "Pipeline de Minería"
@@ -28,6 +30,7 @@ tags:
   - name: "Dashboard & Indicadores"
     description: "Sugerencias y KPIs consolidados"
 
+
 paths:
   /pipeline/run:
     post:
@@ -35,8 +38,8 @@ paths:
         - "Pipeline de Minería"
       summary: "Ejecuta el pipeline completo de minería de datos"
       description: |
-        Activa los procesos de extracción desde el MS de Inventario, limpieza de ruido, 
-        normalización de variables y ajuste de hiperparámetros para K-Means y Random Forest. 
+        Activa los procesos de extracción desde el microservicio de Existencias, limpieza de ruido,
+        normalización de variables y ajuste de hiperparámetros para K-Means y Random Forest.
         Los modelos válidos (R2 > 0.70) se serializan en el volumen persistente montado en /app/models.
       responses:
         '200':
@@ -58,12 +61,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+
   /segmentation:
     get:
       tags:
         - "Segmentación (K-Means)"
       summary: "Clasificación de productos según su rotación de venta"
-      description: "Retorna la pertenencia a clústeres calculada por K-Means para los artículos del inventario."
+      description: "Retorna la pertenencia a clústeres calculada por K-Means para los artículos en existencias."
       parameters:
         - name: "warehouse_id"
           in: "query"
@@ -80,7 +84,8 @@ paths:
               schema:
                 type: "array"
                 items:
-                  $ref: '#/components/schemas/InventorySegmentation'
+                  $ref: '#/components/schemas/StockSegmentation'
+
 
   /predictions:
     get:
@@ -117,12 +122,13 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
 
+
   /dashboard/indicators:
     get:
       tags:
         - "Dashboard & Indicadores"
       summary: "Indicadores clave y recomendaciones de abastecimiento"
-      description: "Devuelve métricas de artículos de baja rotación, riesgos inminentes de quiebre de stock y balanceo óptimo."
+      description: "Devuelve métricas de artículos de baja rotación, riesgos inminentes de quiebre de existencias y balanceo óptimo."
       responses:
         '200':
           description: "Resumen general para la interfaz del dashboard"
@@ -130,6 +136,7 @@ paths:
             application/json:
               schema:
                 $ref: '#/components/schemas/DashboardIndicators'
+
 
 components:
   schemas:
@@ -146,6 +153,7 @@ components:
           type: "array"
           items:
             $ref: '#/components/schemas/TrainedModel'
+
 
     TrainedModel:
       type: "object"
@@ -176,7 +184,8 @@ components:
           format: "date-time"
           example: "2026-10-17T18:30:00Z"
 
-    InventorySegmentation:
+
+    StockSegmentation:
       type: "object"
       properties:
         id:
@@ -199,6 +208,7 @@ components:
           type: "string"
           format: "date-time"
           example: "2026-10-17T18:32:00Z"
+
 
     DemandPrediction:
       type: "object"
@@ -228,6 +238,7 @@ components:
           format: "date-time"
           example: "2026-10-17T18:32:00Z"
 
+
     StockSuggestion:
       type: "object"
       properties:
@@ -254,6 +265,7 @@ components:
           format: "date-time"
           example: "2026-10-17T18:32:00Z"
 
+
     DashboardIndicators:
       type: "object"
       properties:
@@ -268,6 +280,7 @@ components:
           items:
             $ref: '#/components/schemas/StockSuggestion'
 
+
     ErrorResponse:
       type: "object"
       properties:
@@ -277,3 +290,6 @@ components:
         message:
           type: "string"
           example: "El modelo Random Forest no superó el umbral R^2 mínimo aceptable (0.70)."
+
+
+
