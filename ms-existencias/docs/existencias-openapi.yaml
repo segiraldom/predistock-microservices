@@ -1,0 +1,1010 @@
+openapi: 3.0.3
+info:
+  title: "PrediStock - Microservicio de Existencias"
+  version: "1.0.0"
+  description: |
+    API del microservicio de existencias de PrediStock. Controla el stock por bodega,
+    el kardex de movimientos, los lotes con fecha de vencimiento, las órdenes de compra,
+    los traslados entre bodegas y las devoluciones.
+
+    ### Características
+    * **Tecnología:** Django + PostgreSQL (`existencias_db`).
+    * **Acceso:** únicamente a través del API Gateway (Laravel), que valida el JWT y
+      entrega el `usuario_id` para la auditoría.
+    * **Regla central:** todo cambio de stock se registra como un movimiento del kardex.
+      El saldo (`existencias`) nunca se edita directamente, y los movimientos no se
+      modifican ni se eliminan.
+    * **Dependencias:** consulta al microservicio de catálogo para validar productos
+      y proveedores, y notifica al microservicio de notificaciones cuando el stock
+      queda por debajo del mínimo (RF09).
+
+    Requerimientos cubiertos: RF04, RF05, RF06, RF09, RF10, RF11, RF13.
+
+servers:
+  - url: "http://localhost:8002/api/existencias"
+    description: "Entorno local / Contenedor directo"
+  - url: "http://api.predistock.local/api/existencias"
+    description: "Enrutado vía API Gateway (Laravel)"
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: "Bodegas"
+    description: "Gestión de ubicaciones físicas de almacenamiento (RF05)"
+  - name: "Stock"
+    description: "Consulta de saldos por producto y bodega, y umbrales de alerta (RF04, RF05, RF09)"
+  - name: "Movimientos"
+    description: "Registro de entradas, salidas y ajustes, y consulta del kardex (RF04, RF10)"
+  - name: "Lotes"
+    description: "Consulta de lotes y corrección de sus datos descriptivos (vencimiento de perecederos)"
+  - name: "Órdenes de compra"
+    description: "Órdenes a proveedores y recepción de mercancía (RF06)"
+  - name: "Traslados"
+    description: "Movimiento de stock entre bodegas (RF04)"
+  - name: "Devoluciones"
+    description: "Devoluciones de clientes y hacia proveedores (RF13)"
+  - name: "Reportes"
+    description: "Reportes básicos de inventario: existencias, valorización y rotación (RF11)"
+
+paths:
+  /bodegas:
+    get:
+      tags: ["Bodegas"]
+      summary: "Lista las bodegas"
+      parameters:
+        - name: region
+          in: query
+          schema: { type: string, example: "Centro" }
+        - name: activa
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: "Listado de bodegas"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Bodega' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+    post:
+      tags: ["Bodegas"]
+      summary: "Crea una bodega"
+      description: "Solo rol ADMIN."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/BodegaInput' }
+      responses:
+        '201':
+          description: "Bodega creada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Bodega' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '409': { $ref: '#/components/responses/Conflicto' }
+
+  /bodegas/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: ["Bodegas"]
+      summary: "Obtiene una bodega"
+      responses:
+        '200':
+          description: "Bodega encontrada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Bodega' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+    put:
+      tags: ["Bodegas"]
+      summary: "Actualiza o desactiva una bodega"
+      description: "Para desactivarla se envía `activa = false`. Solo rol ADMIN."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              allOf:
+                - $ref: '#/components/schemas/BodegaInput'
+                - type: object
+                  properties:
+                    activa: { type: boolean, example: true }
+      responses:
+        '200':
+          description: "Bodega actualizada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Bodega' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+
+  /stock:
+    get:
+      tags: ["Stock"]
+      summary: "Consulta el stock por producto y bodega"
+      description: |
+        Es la consulta más frecuente del sistema (RNF06: menos de 2 s). Lee la tabla
+        `existencias` directamente, sin recalcular el kardex.
+        Con `bajo_minimo=true` devuelve solo los productos por debajo de su umbral.
+      parameters:
+        - name: producto_id
+          in: query
+          schema: { type: integer, example: 12 }
+        - name: bodega_id
+          in: query
+          schema: { type: integer, example: 1 }
+        - name: bajo_minimo
+          in: query
+          schema: { type: boolean, example: false }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: "Saldos encontrados"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Existencia' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+    post:
+      tags: ["Stock"]
+      summary: "Registra un producto en una bodega"
+      description: |
+        Crea la fila de existencias con cantidad 0 y sus umbrales. Antes valida con el
+        microservicio de catálogo que el producto exista y esté activo.
+        Solo rol ADMIN.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ExistenciaInput' }
+      responses:
+        '201':
+          description: "Producto registrado en la bodega"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Existencia' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '409':
+          description: "El producto ya está registrado en esa bodega"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422': { $ref: '#/components/responses/ReferenciaInvalida' }
+        '503': { $ref: '#/components/responses/ServicioNoDisponible' }
+
+  /stock/{id}/umbral:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: ["Stock"]
+      summary: "Configura el stock mínimo y máximo"
+      description: "El stock mínimo es el umbral que dispara la alerta de RF09."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UmbralInput' }
+      responses:
+        '200':
+          description: "Umbral actualizado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Existencia' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+
+  /movimientos:
+    get:
+      tags: ["Movimientos"]
+      summary: "Consulta el kardex"
+      description: "Historial de quién, cuándo y qué movimiento se realizó (RF10)."
+      parameters:
+        - name: producto_id
+          in: query
+          schema: { type: integer, example: 12 }
+        - name: bodega_id
+          in: query
+          schema: { type: integer, example: 1 }
+        - name: tipo
+          in: query
+          schema: { $ref: '#/components/schemas/TipoMovimiento' }
+        - name: usuario_id
+          in: query
+          schema: { type: integer, example: 3 }
+        - name: desde
+          in: query
+          schema: { type: string, format: date, example: "2026-10-01" }
+        - name: hasta
+          in: query
+          schema: { type: string, format: date, example: "2026-10-31" }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: "Movimientos encontrados, del más reciente al más antiguo"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Movimiento' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+    post:
+      tags: ["Movimientos"]
+      summary: "Registra una entrada, salida o ajuste manual"
+      description: |
+        En una sola transacción: valida el saldo, inserta el movimiento y actualiza
+        `existencias` (y `lotes` si el producto es perecedero).
+        Si el saldo queda por debajo del mínimo, notifica al microservicio de notificaciones.
+        Los traslados, recepciones de órdenes y devoluciones generan sus movimientos
+        desde sus propios endpoints.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/MovimientoInput' }
+      responses:
+        '201':
+          description: "Movimiento registrado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Movimiento' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '403':
+          description: "El operador intenta registrar un movimiento en una bodega distinta a la suya"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409': { $ref: '#/components/responses/StockInsuficiente' }
+        '422': { $ref: '#/components/responses/ReferenciaInvalida' }
+
+  /lotes:
+    get:
+      tags: ["Lotes"]
+      summary: "Consulta lotes y vencimientos"
+      description: "Con `vence_antes_de` lista los lotes próximos a vencer, ordenados por fecha de vencimiento."
+      parameters:
+        - name: producto_id
+          in: query
+          schema: { type: integer, example: 12 }
+        - name: bodega_id
+          in: query
+          schema: { type: integer, example: 1 }
+        - name: vence_antes_de
+          in: query
+          schema: { type: string, format: date, example: "2026-11-15" }
+        - name: con_saldo
+          in: query
+          description: "Solo lotes con cantidad mayor que cero"
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: "Lotes encontrados"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Lote' }
+
+  /lotes/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: ["Lotes"]
+      summary: "Corrige los datos descriptivos de un lote"
+      description: |
+        Permite corregir errores de digitación en el número de lote o la fecha de
+        vencimiento. **No permite modificar la cantidad**: la cantidad de un lote solo
+        cambia mediante movimientos registrados en el kardex (RF10). Solo rol ADMIN.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoteCorreccionInput' }
+      responses:
+        '200':
+          description: "Lote corregido"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Lote' }
+        '400':
+          description: "Datos inválidos o se intentó modificar la cantidad"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error: "CAMPO_NO_EDITABLE"
+                mensaje: "La cantidad de un lote solo puede cambiar mediante movimientos"
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+
+  /ordenes-compra:
+    get:
+      tags: ["Órdenes de compra"]
+      summary: "Lista órdenes de compra"
+      parameters:
+        - name: estado
+          in: query
+          schema: { $ref: '#/components/schemas/EstadoOrden' }
+        - name: proveedor_id
+          in: query
+          schema: { type: integer, example: 5 }
+        - name: bodega_id
+          in: query
+          schema: { type: integer, example: 1 }
+      responses:
+        '200':
+          description: "Listado de órdenes"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/OrdenCompra' }
+    post:
+      tags: ["Órdenes de compra"]
+      summary: "Crea una orden de compra"
+      description: |
+        Crea la orden y su detalle en un solo request, en estado PENDIENTE.
+        Valida con catálogo el proveedor y los productos. No modifica el stock.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/OrdenCompraInput' }
+      responses:
+        '201':
+          description: "Orden creada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrdenCompra' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '422': { $ref: '#/components/responses/ReferenciaInvalida' }
+        '503': { $ref: '#/components/responses/ServicioNoDisponible' }
+
+  /ordenes-compra/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: ["Órdenes de compra"]
+      summary: "Obtiene el detalle de una orden"
+      responses:
+        '200':
+          description: "Orden encontrada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrdenCompra' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+
+  /ordenes-compra/{id}/estado:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    patch:
+      tags: ["Órdenes de compra"]
+      summary: "Cambia el estado de una orden"
+      description: "Uso principal: cancelar una orden. PARCIAL y RECIBIDA se asignan automáticamente al registrar recepciones."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [estado]
+              properties:
+                estado: { type: string, enum: [CANCELADA], example: "CANCELADA" }
+      responses:
+        '200':
+          description: "Estado actualizado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrdenCompra' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '409':
+          description: "La orden ya fue recibida total o parcialmente y no puede cancelarse"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /ordenes-compra/{id}/recepciones:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: ["Órdenes de compra"]
+      summary: "Recibe mercancía contra la orden"
+      description: |
+        Por cada línea recibida: genera un movimiento ENTRADA, suma al stock,
+        crea el lote si el producto es perecedero y acumula `cantidad_recibida`.
+        La orden pasa a PARCIAL o RECIBIDA según lo recibido.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/RecepcionInput' }
+      responses:
+        '201':
+          description: "Recepción registrada; devuelve la orden actualizada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/OrdenCompra' }
+        '400':
+          description: "Cantidad recibida mayor a la pendiente, o falta el lote de un producto perecedero"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '409':
+          description: "La orden está CANCELADA o ya fue RECIBIDA"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /traslados:
+    get:
+      tags: ["Traslados"]
+      summary: "Lista traslados"
+      parameters:
+        - name: bodega_origen_id
+          in: query
+          schema: { type: integer, example: 2 }
+        - name: bodega_destino_id
+          in: query
+          schema: { type: integer, example: 1 }
+        - name: desde
+          in: query
+          schema: { type: string, format: date }
+        - name: hasta
+          in: query
+          schema: { type: string, format: date }
+      responses:
+        '200':
+          description: "Listado de traslados"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Traslado' }
+    post:
+      tags: ["Traslados"]
+      summary: "Registra un traslado entre bodegas"
+      description: |
+        En una sola transacción genera, por cada producto, un movimiento TRASLADO_SALIDA
+        en la bodega origen y un TRASLADO_ENTRADA en la bodega destino.
+        `sugerencia_id` es opcional e indica que el traslado nació de una sugerencia
+        del microservicio de analítica (RFM_07).
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/TrasladoInput' }
+      responses:
+        '201':
+          description: "Traslado registrado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Traslado' }
+        '400':
+          description: "Datos inválidos o la bodega origen es igual a la destino"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '409': { $ref: '#/components/responses/StockInsuficiente' }
+
+  /traslados/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: ["Traslados"]
+      summary: "Obtiene el detalle de un traslado"
+      responses:
+        '200':
+          description: "Traslado encontrado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Traslado' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+
+  /devoluciones:
+    get:
+      tags: ["Devoluciones"]
+      summary: "Lista devoluciones"
+      parameters:
+        - name: tipo
+          in: query
+          schema: { type: string, enum: [CLIENTE, PROVEEDOR] }
+        - name: bodega_id
+          in: query
+          schema: { type: integer, example: 1 }
+        - name: proveedor_id
+          in: query
+          schema: { type: integer, example: 5 }
+      responses:
+        '200':
+          description: "Listado de devoluciones"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Devolucion' }
+    post:
+      tags: ["Devoluciones"]
+      summary: "Registra una devolución"
+      description: |
+        * **CLIENTE:** solo las líneas con condición APTO generan un movimiento
+          DEVOLUCION_CLIENTE y vuelven al stock. Las AVERIADO quedan registradas sin sumar.
+        * **PROVEEDOR:** cada línea genera un movimiento DEVOLUCION_PROVEEDOR que resta del stock.
+          Requiere `proveedor_id`, que se valida con catálogo.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/DevolucionInput' }
+      responses:
+        '201':
+          description: "Devolución registrada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Devolucion' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '409': { $ref: '#/components/responses/StockInsuficiente' }
+        '422': { $ref: '#/components/responses/ReferenciaInvalida' }
+
+  /devoluciones/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: ["Devoluciones"]
+      summary: "Obtiene el detalle de una devolución"
+      responses:
+        '200':
+          description: "Devolución encontrada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Devolucion' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+
+  /reportes/existencias:
+    get:
+      tags: ["Reportes"]
+      summary: "Reporte de existencias actuales"
+      description: "Saldo actual de cada producto por bodega, con su estado frente al umbral mínimo y máximo (RF11)."
+      parameters:
+        - name: bodega_id
+          in: query
+          description: "Si se omite, incluye todas las bodegas"
+          schema: { type: integer, example: 1 }
+        - name: estado
+          in: query
+          schema: { type: string, enum: [BAJO_MINIMO, NORMAL, SOBRESTOCK] }
+      responses:
+        '200':
+          description: "Reporte generado"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  fecha_corte: { type: string, format: date-time, example: "2026-10-24T20:00:00-05:00" }
+                  total_registros: { type: integer, example: 1 }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReporteExistenciaItem' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+        '503': { $ref: '#/components/responses/ServicioNoDisponible' }
+
+  /reportes/valorizacion:
+    get:
+      tags: ["Reportes"]
+      summary: "Reporte de valorización del inventario"
+      description: |
+        Valor del inventario = cantidad en existencias x costo del producto.
+        El costo se obtiene del microservicio de catálogo (RF11).
+      parameters:
+        - name: bodega_id
+          in: query
+          description: "Si se omite, devuelve el consolidado y el detalle por bodega"
+          schema: { type: integer, example: 1 }
+      responses:
+        '200':
+          description: "Reporte generado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ReporteValorizacion' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+        '503': { $ref: '#/components/responses/ServicioNoDisponible' }
+
+  /reportes/rotacion:
+    get:
+      tags: ["Reportes"]
+      summary: "Reporte de productos con mayor y menor rotación"
+      description: |
+        Calcula la rotación a partir de los movimientos de tipo SALIDA del kardex en el
+        periodo indicado (RF11). La segmentación avanzada por K-Means la realiza el
+        microservicio de analítica.
+      parameters:
+        - name: desde
+          in: query
+          required: true
+          schema: { type: string, format: date, example: "2026-10-01" }
+        - name: hasta
+          in: query
+          required: true
+          schema: { type: string, format: date, example: "2026-10-31" }
+        - name: bodega_id
+          in: query
+          schema: { type: integer, example: 1 }
+        - name: orden
+          in: query
+          schema: { type: string, enum: [MAYOR, MENOR], default: MAYOR }
+        - name: limite
+          in: query
+          schema: { type: integer, default: 10, maximum: 100 }
+      responses:
+        '200':
+          description: "Reporte generado"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  desde: { type: string, format: date, example: "2026-10-01" }
+                  hasta: { type: string, format: date, example: "2026-10-31" }
+                  orden: { type: string, example: "MAYOR" }
+                  items:
+                    type: array
+                    items: { $ref: '#/components/schemas/ReporteRotacionItem' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Token JWT validado por el API Gateway; de él se obtiene el usuario_id para la auditoría"
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, example: 1 }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, default: 20, maximum: 100 }
+
+  responses:
+    DatosInvalidos:
+      description: "Datos incompletos o inválidos"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NoAutorizado:
+      description: "Token ausente, inválido o vencido"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    SinPermiso:
+      description: "El rol del usuario no tiene permiso para esta operación"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NoEncontrado:
+      description: "El recurso no existe"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflicto:
+      description: "Valor duplicado"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    StockInsuficiente:
+      description: "No hay stock suficiente en la bodega para realizar la operación"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: "STOCK_INSUFICIENTE"
+            mensaje: "Disponible 80, solicitado 120 (producto 12, bodega 1)"
+    ReferenciaInvalida:
+      description: "El producto o proveedor no existe o está inactivo en el microservicio de catálogo"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    ServicioNoDisponible:
+      description: "El microservicio de catálogo no respondió; la operación no se realizó"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+          example:
+            error: "CATALOGO_NO_DISPONIBLE"
+            mensaje: "No fue posible validar el producto. Intente más tarde."
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string, example: "NOT_FOUND" }
+        mensaje: { type: string, example: "La bodega 9 no existe" }
+
+    TipoMovimiento:
+      type: string
+      enum: [ENTRADA, SALIDA, AJUSTE_ENTRADA, AJUSTE_SALIDA, TRASLADO_ENTRADA, TRASLADO_SALIDA, DEVOLUCION_CLIENTE, DEVOLUCION_PROVEEDOR]
+    EstadoOrden:
+      type: string
+      enum: [PENDIENTE, PARCIAL, RECIBIDA, CANCELADA]
+
+    Bodega:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        codigo: { type: string, example: "BOD-MZL" }
+        nombre: { type: string, example: "Bodega Manizales" }
+        region: { type: string, example: "Centro" }
+        ciudad: { type: string, example: "Manizales" }
+        activa: { type: boolean, example: true }
+    BodegaInput:
+      type: object
+      required: [codigo, nombre, region]
+      properties:
+        codigo: { type: string, maxLength: 20, example: "BOD-MZL" }
+        nombre: { type: string, maxLength: 100, example: "Bodega Manizales" }
+        region: { type: string, maxLength: 50, example: "Centro" }
+        ciudad: { type: string, maxLength: 80, example: "Manizales" }
+
+    Existencia:
+      type: object
+      properties:
+        id: { type: integer, example: 7 }
+        producto_id: { type: integer, example: 12 }
+        producto_nombre: { type: string, description: "Obtenido de catálogo", example: "Leche entera 1L" }
+        bodega_id: { type: integer, example: 1 }
+        cantidad: { type: number, format: double, example: 80.000 }
+        stock_minimo: { type: number, format: double, example: 100.000 }
+        stock_maximo: { type: number, format: double, nullable: true, example: 500.000 }
+        bajo_minimo: { type: boolean, example: true }
+    ExistenciaInput:
+      type: object
+      required: [producto_id, bodega_id, stock_minimo]
+      properties:
+        producto_id: { type: integer, example: 12 }
+        bodega_id: { type: integer, example: 1 }
+        stock_minimo: { type: number, format: double, minimum: 0, example: 100 }
+        stock_maximo: { type: number, format: double, minimum: 0, nullable: true, example: 500 }
+    UmbralInput:
+      type: object
+      required: [stock_minimo]
+      properties:
+        stock_minimo: { type: number, format: double, minimum: 0, example: 100 }
+        stock_maximo: { type: number, format: double, minimum: 0, nullable: true, example: 500 }
+
+    Lote:
+      type: object
+      properties:
+        id: { type: integer, example: 3 }
+        producto_id: { type: integer, example: 12 }
+        bodega_id: { type: integer, example: 1 }
+        numero_lote: { type: string, example: "L-778" }
+        fecha_vencimiento: { type: string, format: date, example: "2026-11-30" }
+        cantidad: { type: number, format: double, example: 80.000 }
+
+    LoteCorreccionInput:
+      type: object
+      minProperties: 1
+      additionalProperties: false
+      description: "Solo se aceptan estos dos campos"
+      properties:
+        numero_lote: { type: string, maxLength: 30, example: "L-778" }
+        fecha_vencimiento: { type: string, format: date, example: "2026-12-05" }
+
+    Movimiento:
+      type: object
+      properties:
+        id: { type: integer, format: int64, example: 1045 }
+        producto_id: { type: integer, example: 12 }
+        bodega_id: { type: integer, example: 1 }
+        lote_id: { type: integer, nullable: true, example: 3 }
+        tipo: { $ref: '#/components/schemas/TipoMovimiento' }
+        cantidad: { type: number, format: double, example: 220.000 }
+        saldo_resultante: { type: number, format: double, example: 80.000 }
+        orden_compra_id: { type: integer, nullable: true, example: null }
+        traslado_id: { type: integer, nullable: true, example: null }
+        devolucion_id: { type: integer, nullable: true, example: null }
+        usuario_id: { type: integer, example: 3 }
+        motivo: { type: string, nullable: true, example: null }
+        fecha: { type: string, format: date-time, example: "2026-10-23T10:15:00-05:00" }
+    MovimientoInput:
+      type: object
+      required: [producto_id, bodega_id, tipo, cantidad]
+      description: "El usuario_id no se envía: lo toma el servicio del token validado por el Gateway."
+      properties:
+        producto_id: { type: integer, example: 12 }
+        bodega_id: { type: integer, example: 1 }
+        tipo:
+          type: string
+          enum: [ENTRADA, SALIDA, AJUSTE_ENTRADA, AJUSTE_SALIDA]
+          example: "SALIDA"
+        cantidad: { type: number, format: double, exclusiveMinimum: true, minimum: 0, example: 220 }
+        lote_id:
+          type: integer
+          nullable: true
+          description: "Para salidas y ajustes de perecederos. Si se omite, se usa el lote que vence primero (FEFO)."
+        numero_lote:
+          type: string
+          description: "Solo para ENTRADA de perecederos: se crea el lote"
+          example: "L-778"
+        fecha_vencimiento:
+          type: string
+          format: date
+          description: "Solo para ENTRADA de perecederos"
+          example: "2026-11-30"
+        motivo:
+          type: string
+          maxLength: 255
+          description: "Obligatorio en los ajustes"
+          example: "Venta a cliente mayorista"
+
+    LineaOrdenInput:
+      type: object
+      required: [producto_id, cantidad_solicitada, precio_unitario]
+      properties:
+        producto_id: { type: integer, example: 12 }
+        cantidad_solicitada: { type: number, format: double, exclusiveMinimum: true, minimum: 0, example: 300 }
+        precio_unitario: { type: number, format: double, minimum: 0, example: 3200 }
+    LineaOrden:
+      type: object
+      properties:
+        id: { type: integer, example: 21 }
+        producto_id: { type: integer, example: 12 }
+        cantidad_solicitada: { type: number, format: double, example: 300.000 }
+        cantidad_recibida: { type: number, format: double, example: 200.000 }
+        precio_unitario: { type: number, format: double, example: 3200.00 }
+    OrdenCompraInput:
+      type: object
+      required: [proveedor_id, bodega_id, detalle]
+      properties:
+        proveedor_id: { type: integer, example: 5 }
+        bodega_id: { type: integer, example: 1 }
+        detalle:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/LineaOrdenInput' }
+    OrdenCompra:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        numero: { type: string, example: "OC-2026-0001" }
+        proveedor_id: { type: integer, example: 5 }
+        bodega_id: { type: integer, example: 1 }
+        estado: { $ref: '#/components/schemas/EstadoOrden' }
+        fecha_emision: { type: string, format: date, example: "2026-10-20" }
+        creada_por: { type: integer, example: 1 }
+        detalle:
+          type: array
+          items: { $ref: '#/components/schemas/LineaOrden' }
+    RecepcionInput:
+      type: object
+      required: [lineas]
+      properties:
+        lineas:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required: [detalle_id, cantidad]
+            properties:
+              detalle_id: { type: integer, description: "Id de la línea de detalle_orden_compra", example: 21 }
+              cantidad: { type: number, format: double, exclusiveMinimum: true, minimum: 0, example: 200 }
+              numero_lote: { type: string, description: "Obligatorio para perecederos", example: "L-778" }
+              fecha_vencimiento: { type: string, format: date, description: "Obligatorio para perecederos", example: "2026-11-30" }
+
+    LineaTraslado:
+      type: object
+      required: [producto_id, cantidad]
+      properties:
+        producto_id: { type: integer, example: 12 }
+        cantidad: { type: number, format: double, exclusiveMinimum: true, minimum: 0, example: 150 }
+    TrasladoInput:
+      type: object
+      required: [bodega_origen_id, bodega_destino_id, detalle]
+      properties:
+        bodega_origen_id: { type: integer, example: 2 }
+        bodega_destino_id: { type: integer, example: 1 }
+        sugerencia_id: { type: integer, nullable: true, example: 14 }
+        detalle:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/LineaTraslado' }
+    Traslado:
+      type: object
+      properties:
+        id: { type: integer, example: 4 }
+        bodega_origen_id: { type: integer, example: 2 }
+        bodega_destino_id: { type: integer, example: 1 }
+        sugerencia_id: { type: integer, nullable: true, example: 14 }
+        usuario_id: { type: integer, example: 1 }
+        fecha: { type: string, format: date-time, example: "2026-10-23T11:00:00-05:00" }
+        detalle:
+          type: array
+          items: { $ref: '#/components/schemas/LineaTraslado' }
+
+    LineaDevolucion:
+      type: object
+      required: [producto_id, cantidad, condicion]
+      properties:
+        producto_id: { type: integer, example: 12 }
+        cantidad: { type: number, format: double, exclusiveMinimum: true, minimum: 0, example: 8 }
+        condicion: { type: string, enum: [APTO, AVERIADO], example: "APTO" }
+    DevolucionInput:
+      type: object
+      required: [tipo, bodega_id, motivo, detalle]
+      properties:
+        tipo: { type: string, enum: [CLIENTE, PROVEEDOR], example: "CLIENTE" }
+        bodega_id: { type: integer, example: 1 }
+        proveedor_id: { type: integer, nullable: true, description: "Obligatorio si tipo = PROVEEDOR", example: null }
+        referencia_cliente: { type: string, maxLength: 50, nullable: true, description: "Factura del cliente si tipo = CLIENTE", example: "F-123" }
+        motivo: { type: string, maxLength: 255, example: "Producto con empaque defectuoso" }
+        detalle:
+          type: array
+          minItems: 1
+          items: { $ref: '#/components/schemas/LineaDevolucion' }
+    Devolucion:
+      type: object
+      properties:
+        id: { type: integer, example: 2 }
+        tipo: { type: string, enum: [CLIENTE, PROVEEDOR], example: "CLIENTE" }
+        bodega_id: { type: integer, example: 1 }
+        proveedor_id: { type: integer, nullable: true, example: null }
+        referencia_cliente: { type: string, nullable: true, example: "F-123" }
+        motivo: { type: string, example: "Producto con empaque defectuoso" }
+        usuario_id: { type: integer, example: 3 }
+        fecha: { type: string, format: date-time, example: "2026-10-23T12:00:00-05:00" }
+        detalle:
+          type: array
+          items: { $ref: '#/components/schemas/LineaDevolucion' }
+
+    ReporteExistenciaItem:
+      type: object
+      properties:
+        producto_id: { type: integer, example: 12 }
+        producto_codigo: { type: string, description: "Obtenido de catálogo", example: "LAC-001" }
+        producto_nombre: { type: string, description: "Obtenido de catálogo", example: "Leche entera 1L" }
+        bodega_id: { type: integer, example: 1 }
+        bodega_nombre: { type: string, example: "Bodega Manizales" }
+        cantidad: { type: number, format: double, example: 80.000 }
+        stock_minimo: { type: number, format: double, example: 100.000 }
+        stock_maximo: { type: number, format: double, nullable: true, example: 500.000 }
+        estado: { type: string, enum: [BAJO_MINIMO, NORMAL, SOBRESTOCK], example: "BAJO_MINIMO" }
+    ReporteValorizacion:
+      type: object
+      properties:
+        fecha_corte: { type: string, format: date-time, example: "2026-10-24T20:00:00-05:00" }
+        valor_total: { type: number, format: double, example: 15840000.00 }
+        por_bodega:
+          type: array
+          items:
+            type: object
+            properties:
+              bodega_id: { type: integer, example: 1 }
+              bodega_nombre: { type: string, example: "Bodega Manizales" }
+              total_productos: { type: integer, example: 120 }
+              valor: { type: number, format: double, example: 9450000.00 }
+    ReporteRotacionItem:
+      type: object
+      properties:
+        producto_id: { type: integer, example: 12 }
+        producto_nombre: { type: string, description: "Obtenido de catálogo", example: "Leche entera 1L" }
+        unidades_salida: { type: number, format: double, description: "Suma de salidas en el periodo", example: 1820.000 }
+        stock_promedio: { type: number, format: double, example: 260.000 }
+        indice_rotacion: { type: number, format: double, description: "unidades_salida / stock_promedio", example: 7.0 }
