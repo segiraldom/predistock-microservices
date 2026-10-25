@@ -1,0 +1,554 @@
+openapi: 3.0.3
+info:
+  title: "PrediStock - Microservicio de Catálogo"
+  version: "1.0.0"
+  description: |
+    API del microservicio de catálogo de PrediStock. Gestiona productos, categorías
+    y subcategorías, proveedores y unidades de medida.
+
+    ### Características
+    * **Tecnología:** Django + PostgreSQL (`catalogo_db`).
+    * **Acceso:** únicamente a través del API Gateway (Laravel), que valida el JWT.
+    * **Baja lógica:** los DELETE marcan el registro como inactivo; no se borra porque
+      el microservicio de existencias guarda referencias a productos y proveedores.
+
+    Requerimientos cubiertos: RF01, RF02, RF03, RF12.
+
+servers:
+  - url: "http://localhost:8001/api/catalogo"
+    description: "Entorno local / Contenedor directo"
+  - url: "http://api.predistock.local/api/catalogo"
+    description: "Enrutado vía API Gateway (Laravel)"
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: "Productos"
+    description: "Gestión, búsqueda y filtrado de productos (RF01, RF12)"
+  - name: "Categorías"
+    description: "Gestión de categorías y subcategorías (RF02)"
+  - name: "Proveedores"
+    description: "Gestión de proveedores y su asociación con productos (RF03)"
+  - name: "Unidades de medida"
+    description: "Gestión de unidades de medida (RF01)"
+
+paths:
+  /productos:
+    get:
+      tags: ["Productos"]
+      summary: "Lista y filtra productos"
+      description: "Permite buscar por nombre o código y filtrar por categoría, proveedor o estado (RF12)."
+      parameters:
+        - name: nombre
+          in: query
+          description: "Búsqueda parcial por nombre"
+          schema: { type: string, example: "leche" }
+        - name: codigo
+          in: query
+          description: "Código o SKU exacto"
+          schema: { type: string, example: "LAC-001" }
+        - name: categoria_id
+          in: query
+          description: "Incluye los productos de sus subcategorías"
+          schema: { type: integer, example: 2 }
+        - name: proveedor_id
+          in: query
+          schema: { type: integer, example: 5 }
+        - name: activo
+          in: query
+          schema: { type: boolean, default: true }
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          description: "Listado paginado de productos"
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  total: { type: integer, example: 1 }
+                  page: { type: integer, example: 1 }
+                  results:
+                    type: array
+                    items: { $ref: '#/components/schemas/Producto' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+    post:
+      tags: ["Productos"]
+      summary: "Crea un producto"
+      description: "Solo rol ADMIN."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductoInput' }
+      responses:
+        '201':
+          description: "Producto creado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Producto' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '409': { $ref: '#/components/responses/Conflicto' }
+
+  /productos/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: ["Productos"]
+      summary: "Obtiene el detalle de un producto"
+      description: "Lo consume el microservicio de existencias para validar que el producto exista, esté activo y saber si es perecedero."
+      responses:
+        '200':
+          description: "Producto encontrado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductoDetalle' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+    put:
+      tags: ["Productos"]
+      summary: "Actualiza un producto"
+      description: "Solo rol ADMIN."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductoInput' }
+      responses:
+        '200':
+          description: "Producto actualizado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Producto' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '409': { $ref: '#/components/responses/Conflicto' }
+    delete:
+      tags: ["Productos"]
+      summary: "Da de baja un producto (baja lógica)"
+      description: "Marca `activo = false`. Solo rol ADMIN."
+      responses:
+        '204': { description: "Producto dado de baja" }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+
+  /productos/{id}/proveedores:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    post:
+      tags: ["Proveedores"]
+      summary: "Asocia un proveedor a un producto"
+      description: "Crea un registro en `producto_proveedor`. Solo rol ADMIN."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductoProveedorInput' }
+      responses:
+        '201':
+          description: "Asociación creada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductoProveedor' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '409': { $ref: '#/components/responses/Conflicto' }
+
+  /productos/{id}/proveedores/{proveedor_id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+      - name: proveedor_id
+        in: path
+        required: true
+        schema: { type: integer, example: 5 }
+    delete:
+      tags: ["Proveedores"]
+      summary: "Elimina la asociación producto-proveedor"
+      responses:
+        '204': { description: "Asociación eliminada" }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+
+  /categorias:
+    get:
+      tags: ["Categorías"]
+      summary: "Lista categorías o subcategorías"
+      description: "Sin `padre_id` devuelve las categorías principales; con `padre_id` devuelve sus subcategorías."
+      parameters:
+        - name: padre_id
+          in: query
+          schema: { type: integer, example: 1 }
+        - name: activo
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: "Listado de categorías"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Categoria' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+    post:
+      tags: ["Categorías"]
+      summary: "Crea una categoría o subcategoría"
+      description: "Si se envía `categoria_padre_id` se crea como subcategoría. Solo rol ADMIN."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoriaInput' }
+      responses:
+        '201':
+          description: "Categoría creada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Categoria' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '409': { $ref: '#/components/responses/Conflicto' }
+
+  /categorias/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: ["Categorías"]
+      summary: "Actualiza una categoría"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/CategoriaInput' }
+      responses:
+        '200':
+          description: "Categoría actualizada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Categoria' }
+        '400':
+          description: "Datos inválidos o la categoría se asignaría como su propio padre (ciclo)"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+    delete:
+      tags: ["Categorías"]
+      summary: "Da de baja una categoría (baja lógica)"
+      responses:
+        '204': { description: "Categoría dada de baja" }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '409':
+          description: "La categoría tiene productos o subcategorías activas"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /proveedores:
+    get:
+      tags: ["Proveedores"]
+      summary: "Lista proveedores"
+      parameters:
+        - name: razon_social
+          in: query
+          description: "Búsqueda parcial"
+          schema: { type: string, example: "lácteos" }
+        - name: nit
+          in: query
+          schema: { type: string, example: "900123456-7" }
+        - name: activo
+          in: query
+          schema: { type: boolean, default: true }
+      responses:
+        '200':
+          description: "Listado de proveedores"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Proveedor' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+    post:
+      tags: ["Proveedores"]
+      summary: "Registra un proveedor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProveedorInput' }
+      responses:
+        '201':
+          description: "Proveedor creado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Proveedor' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '409': { $ref: '#/components/responses/Conflicto' }
+
+  /proveedores/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: ["Proveedores"]
+      summary: "Obtiene un proveedor"
+      description: "Lo consume el microservicio de existencias al crear órdenes de compra o devoluciones a proveedor."
+      responses:
+        '200':
+          description: "Proveedor encontrado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Proveedor' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+    put:
+      tags: ["Proveedores"]
+      summary: "Actualiza un proveedor"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProveedorInput' }
+      responses:
+        '200':
+          description: "Proveedor actualizado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Proveedor' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+    delete:
+      tags: ["Proveedores"]
+      summary: "Da de baja un proveedor (baja lógica)"
+      responses:
+        '204': { description: "Proveedor dado de baja" }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+
+  /unidades-medida:
+    get:
+      tags: ["Unidades de medida"]
+      summary: "Lista las unidades de medida"
+      responses:
+        '200':
+          description: "Listado de unidades"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/UnidadMedida' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+    post:
+      tags: ["Unidades de medida"]
+      summary: "Crea una unidad de medida"
+      description: "Permite agregar nuevas presentaciones (por ejemplo, PACA x 6) sin modificar el código. Solo rol ADMIN."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UnidadMedidaInput' }
+      responses:
+        '201':
+          description: "Unidad creada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnidadMedida' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '409': { $ref: '#/components/responses/Conflicto' }
+
+  /unidades-medida/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    put:
+      tags: ["Unidades de medida"]
+      summary: "Actualiza una unidad de medida"
+      description: "Solo rol ADMIN."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UnidadMedidaInput' }
+      responses:
+        '200':
+          description: "Unidad actualizada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/UnidadMedida' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '409': { $ref: '#/components/responses/Conflicto' }
+    delete:
+      tags: ["Unidades de medida"]
+      summary: "Elimina una unidad de medida"
+      description: "Solo se permite si ningún producto la usa. Solo rol ADMIN."
+      responses:
+        '204': { description: "Unidad eliminada" }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '409':
+          description: "La unidad está asignada a uno o más productos"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error: "UNIDAD_EN_USO"
+                mensaje: "La unidad CAJA está asignada a 14 productos y no puede eliminarse"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Token JWT emitido al iniciar sesión y validado por el API Gateway"
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, example: 12 }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, default: 1 }
+    PageSize:
+      name: page_size
+      in: query
+      schema: { type: integer, default: 20, maximum: 100 }
+
+  responses:
+    DatosInvalidos:
+      description: "Datos incompletos o inválidos"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NoAutorizado:
+      description: "Token ausente, inválido o vencido"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    SinPermiso:
+      description: "El rol del usuario no tiene permiso para esta operación"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NoEncontrado:
+      description: "El recurso no existe"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    Conflicto:
+      description: "Valor duplicado (código, NIT o asociación ya existente)"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string, example: "NOT_FOUND" }
+        mensaje: { type: string, example: "El producto 99 no existe" }
+
+    UnidadMedida:
+      type: object
+      properties:
+        id: { type: integer, example: 1 }
+        codigo: { type: string, example: "UND" }
+        nombre: { type: string, example: "Unidad" }
+    UnidadMedidaInput:
+      type: object
+      required: [codigo, nombre]
+      properties:
+        codigo: { type: string, maxLength: 10, example: "PACA6" }
+        nombre: { type: string, maxLength: 50, example: "Paca x 6 unidades" }
+
+    Categoria:
+      type: object
+      properties:
+        id: { type: integer, example: 2 }
+        nombre: { type: string, example: "Lácteos" }
+        descripcion: { type: string, nullable: true, example: "Leche y derivados" }
+        categoria_padre_id: { type: integer, nullable: true, example: 1 }
+        activo: { type: boolean, example: true }
+    CategoriaInput:
+      type: object
+      required: [nombre]
+      properties:
+        nombre: { type: string, maxLength: 100, example: "Lácteos" }
+        descripcion: { type: string, maxLength: 255, example: "Leche y derivados" }
+        categoria_padre_id: { type: integer, nullable: true, example: 1 }
+
+    Proveedor:
+      type: object
+      properties:
+        id: { type: integer, example: 5 }
+        nit: { type: string, example: "900123456-7" }
+        razon_social: { type: string, example: "Lácteos del Eje S.A.S." }
+        telefono: { type: string, example: "+57 3001234567" }
+        email: { type: string, format: email, example: "ventas@lacteoseje.com" }
+        ciudad: { type: string, example: "Pereira" }
+        activo: { type: boolean, example: true }
+    ProveedorInput:
+      type: object
+      required: [nit, razon_social]
+      properties:
+        nit: { type: string, maxLength: 20, example: "900123456-7" }
+        razon_social: { type: string, maxLength: 150, example: "Lácteos del Eje S.A.S." }
+        telefono: { type: string, maxLength: 20, example: "+57 3001234567" }
+        email: { type: string, format: email, example: "ventas@lacteoseje.com" }
+        ciudad: { type: string, maxLength: 80, example: "Pereira" }
+
+    Producto:
+      type: object
+      properties:
+        id: { type: integer, example: 12 }
+        codigo: { type: string, example: "LAC-001" }
+        nombre: { type: string, example: "Leche entera 1L" }
+        descripcion: { type: string, nullable: true, example: "Leche entera en bolsa de 1 litro" }
+        categoria_id: { type: integer, example: 2 }
+        unidad_medida_id: { type: integer, example: 1 }
+        precio_venta: { type: number, format: double, example: 4500.00 }
+        costo: { type: number, format: double, example: 3200.00 }
+        es_perecedero: { type: boolean, example: true }
+        activo: { type: boolean, example: true }
+    ProductoDetalle:
+      allOf:
+        - $ref: '#/components/schemas/Producto'
+        - type: object
+          properties:
+            categoria: { $ref: '#/components/schemas/Categoria' }
+            unidad_medida: { $ref: '#/components/schemas/UnidadMedida' }
+            proveedores:
+              type: array
+              items: { $ref: '#/components/schemas/ProductoProveedor' }
+    ProductoInput:
+      type: object
+      required: [codigo, nombre, categoria_id, unidad_medida_id, precio_venta, costo]
+      properties:
+        codigo: { type: string, maxLength: 30, example: "LAC-001" }
+        nombre: { type: string, maxLength: 150, example: "Leche entera 1L" }
+        descripcion: { type: string, example: "Leche entera en bolsa de 1 litro" }
+        categoria_id: { type: integer, example: 2 }
+        unidad_medida_id: { type: integer, example: 1 }
+        precio_venta: { type: number, format: double, minimum: 0, example: 4500.00 }
+        costo: { type: number, format: double, minimum: 0, example: 3200.00 }
+        es_perecedero: { type: boolean, default: false, example: true }
+
+    ProductoProveedor:
+      type: object
+      properties:
+        proveedor_id: { type: integer, example: 5 }
+        razon_social: { type: string, example: "Lácteos del Eje S.A.S." }
+        precio_compra: { type: number, format: double, example: 3100.00 }
+        es_principal: { type: boolean, example: true }
+    ProductoProveedorInput:
+      type: object
+      required: [proveedor_id, precio_compra]
+      properties:
+        proveedor_id: { type: integer, example: 5 }
+        precio_compra: { type: number, format: double, minimum: 0, example: 3100.00 }
+        es_principal: { type: boolean, default: false }
