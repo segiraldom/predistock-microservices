@@ -1,0 +1,396 @@
+openapi: 3.0.3
+info:
+  title: "PrediStock - Microservicio de Usuarios"
+  version: "1.0.0"
+  description: |
+    API del microservicio de usuarios de PrediStock. Gestiona usuarios, roles y
+    autenticación: inicio de sesión, recuperación y cambio de contraseña.
+
+    ### Características
+    * **Tecnología:** Express + PostgreSQL (`autentificacion_db`).
+    * **Acceso:** únicamente a través del API Gateway (Laravel).
+    * **Autenticación sin estado (JWT):** al iniciar sesión se entrega un token firmado
+      con `usuario_id`, `rol`, `bodega_id` y fecha de expiración. El token no se guarda
+      en el servidor; el API Gateway valida su firma y expiración en cada petición.
+    * **Contraseñas:** se almacenan como hash bcrypt (RNF07).
+    * **Recuperación de contraseña:** se guarda solo el hash del token enviado por
+      correo, con expiración y de un solo uso (`tokens_recuperacion`).
+
+    Requerimientos cubiertos: RF07, RF08, RNF07.
+
+servers:
+  - url: "http://localhost:3000/api/usuarios"
+    description: "Entorno local / Contenedor directo"
+  - url: "http://api.predistock.local/api/usuarios"
+    description: "Enrutado vía API Gateway (Laravel)"
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: "Autenticación"
+    description: "Inicio de sesión, cierre de sesión y contraseñas (RF08)"
+  - name: "Usuarios"
+    description: "Registro, consulta, actualización y asignación de usuarios (RF07)"
+  - name: "Roles"
+    description: "Consulta de roles disponibles (RF07)"
+
+paths:
+  /auth/login:
+    post:
+      tags: ["Autenticación"]
+      summary: "Inicia sesión"
+      description: |
+        Verifica correo y contraseña. Si son correctos y el usuario está activo,
+        devuelve un JWT firmado. Si fallan, responde siempre con el mismo mensaje
+        para no revelar qué correos están registrados.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/LoginInput' }
+      responses:
+        '200':
+          description: "Inicio de sesión exitoso"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/LoginRespuesta' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '401':
+          description: "Credenciales inválidas o usuario inactivo"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error: "CREDENCIALES_INVALIDAS"
+                mensaje: "Correo o contraseña incorrectos"
+
+  /auth/logout:
+    post:
+      tags: ["Autenticación"]
+      summary: "Cierra sesión"
+      description: |
+        Al ser JWT sin estado, el servidor no guarda sesiones: el cliente descarta el
+        token. El token sigue siendo válido hasta su expiración (duración corta).
+      responses:
+        '204': { description: "Sesión cerrada en el cliente" }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+
+  /auth/me:
+    get:
+      tags: ["Autenticación"]
+      summary: "Obtiene los datos del usuario autenticado"
+      responses:
+        '200':
+          description: "Usuario autenticado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usuario' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+
+  /auth/recuperar-password:
+    post:
+      tags: ["Autenticación"]
+      summary: "Solicita la recuperación de contraseña"
+      description: |
+        Si el correo existe, genera un token aleatorio, guarda su hash en
+        `tokens_recuperacion` con expiración de 30 minutos y envía el enlace por correo.
+        La respuesta es siempre la misma, exista o no el correo.
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email]
+              properties:
+                email: { type: string, format: email, example: "operador@predistock.com" }
+      responses:
+        '200':
+          description: "Solicitud recibida"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mensaje' }
+              example:
+                mensaje: "Si el correo está registrado, recibirás un enlace para restablecer tu contraseña"
+
+  /auth/restablecer-password:
+    post:
+      tags: ["Autenticación"]
+      summary: "Restablece la contraseña con el token recibido por correo"
+      description: "El token debe existir, no estar vencido y no haber sido usado. Al usarse queda marcado como `usado`."
+      security: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, nueva_password]
+              properties:
+                token: { type: string, example: "b7f3c9e1a2d84f6e9c0a5b1d7e3f2a4c" }
+                nueva_password: { $ref: '#/components/schemas/Password' }
+      responses:
+        '200':
+          description: "Contraseña restablecida"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mensaje' }
+        '400':
+          description: "Token inválido, vencido o ya usado, o contraseña que no cumple la política"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+              example:
+                error: "TOKEN_INVALIDO"
+                mensaje: "El enlace de recuperación es inválido o ha expirado"
+
+  /auth/cambiar-password:
+    put:
+      tags: ["Autenticación"]
+      summary: "Cambia la contraseña del usuario autenticado"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [password_actual, nueva_password]
+              properties:
+                password_actual: { type: string, format: password, example: "Actual2026*" }
+                nueva_password: { $ref: '#/components/schemas/Password' }
+      responses:
+        '200':
+          description: "Contraseña actualizada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Mensaje' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '401':
+          description: "Token inválido o la contraseña actual no coincide"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /usuarios:
+    get:
+      tags: ["Usuarios"]
+      summary: "Lista usuarios"
+      description: "Solo rol ADMIN."
+      parameters:
+        - name: rol_id
+          in: query
+          schema: { type: integer, example: 2 }
+        - name: bodega_id
+          in: query
+          schema: { type: integer, example: 1 }
+        - name: activo
+          in: query
+          schema: { type: boolean, default: true }
+        - name: busqueda
+          in: query
+          description: "Búsqueda parcial por nombre, apellido o correo"
+          schema: { type: string, example: "gomez" }
+      responses:
+        '200':
+          description: "Listado de usuarios"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Usuario' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+    post:
+      tags: ["Usuarios"]
+      summary: "Registra un usuario"
+      description: "Solo rol ADMIN. Si el rol es OPERADOR_BODEGA, `bodega_id` es obligatorio."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UsuarioInput' }
+      responses:
+        '201':
+          description: "Usuario creado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usuario' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '409':
+          description: "El correo ya está registrado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+
+  /usuarios/{id}:
+    parameters:
+      - $ref: '#/components/parameters/Id'
+    get:
+      tags: ["Usuarios"]
+      summary: "Obtiene un usuario"
+      description: "Solo rol ADMIN."
+      responses:
+        '200':
+          description: "Usuario encontrado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usuario' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+    put:
+      tags: ["Usuarios"]
+      summary: "Actualiza los datos, el rol o la bodega de un usuario"
+      description: "Solo rol ADMIN. La contraseña no se cambia por este endpoint."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/UsuarioUpdate' }
+      responses:
+        '200':
+          description: "Usuario actualizado"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Usuario' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+        '409':
+          description: "El correo ya está registrado por otro usuario"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+    delete:
+      tags: ["Usuarios"]
+      summary: "Desactiva un usuario (baja lógica)"
+      description: "Marca `activo = false`. No se elimina porque su id aparece en el kardex como responsable de movimientos."
+      responses:
+        '204': { description: "Usuario desactivado" }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
+
+  /roles:
+    get:
+      tags: ["Roles"]
+      summary: "Lista los roles disponibles"
+      responses:
+        '200':
+          description: "Listado de roles"
+          content:
+            application/json:
+              schema:
+                type: array
+                items: { $ref: '#/components/schemas/Rol' }
+        '401': { $ref: '#/components/responses/NoAutorizado' }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: "Token JWT obtenido en /auth/login. Expira en 2 horas."
+
+  parameters:
+    Id:
+      name: id
+      in: path
+      required: true
+      schema: { type: integer, example: 3 }
+
+  responses:
+    DatosInvalidos:
+      description: "Datos incompletos o inválidos"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NoAutorizado:
+      description: "Token ausente, inválido o vencido"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    SinPermiso:
+      description: "El rol del usuario no tiene permiso para esta operación"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+    NoEncontrado:
+      description: "El usuario no existe"
+      content:
+        application/json:
+          schema: { $ref: '#/components/schemas/Error' }
+
+  schemas:
+    Error:
+      type: object
+      properties:
+        error: { type: string, example: "NOT_FOUND" }
+        mensaje: { type: string, example: "El usuario 99 no existe" }
+    Mensaje:
+      type: object
+      properties:
+        mensaje: { type: string, example: "Contraseña actualizada correctamente" }
+
+    Password:
+      type: string
+      format: password
+      minLength: 8
+      description: "Mínimo 8 caracteres, con al menos una letra y un número"
+      example: "Nueva2026*"
+
+    Rol:
+      type: object
+      properties:
+        id: { type: integer, example: 2 }
+        nombre: { type: string, enum: [ADMIN, OPERADOR_BODEGA, ANALISTA], example: "OPERADOR_BODEGA" }
+        descripcion: { type: string, example: "Registra movimientos en su bodega asignada" }
+
+    Usuario:
+      type: object
+      description: "Nunca incluye el password_hash"
+      properties:
+        id: { type: integer, example: 3 }
+        nombre: { type: string, example: "Laura" }
+        apellido: { type: string, example: "Gómez" }
+        email: { type: string, format: email, example: "operador@predistock.com" }
+        rol: { $ref: '#/components/schemas/Rol' }
+        bodega_id: { type: integer, nullable: true, example: 1 }
+        activo: { type: boolean, example: true }
+        created_at: { type: string, format: date-time, example: "2026-10-01T08:00:00-05:00" }
+    UsuarioInput:
+      type: object
+      required: [nombre, apellido, email, password, rol_id]
+      properties:
+        nombre: { type: string, maxLength: 100, example: "Laura" }
+        apellido: { type: string, maxLength: 100, example: "Gómez" }
+        email: { type: string, format: email, maxLength: 100, example: "operador@predistock.com" }
+        password: { $ref: '#/components/schemas/Password' }
+        rol_id: { type: integer, example: 2 }
+        bodega_id: { type: integer, nullable: true, description: "Obligatorio para OPERADOR_BODEGA", example: 1 }
+    UsuarioUpdate:
+      type: object
+      properties:
+        nombre: { type: string, maxLength: 100, example: "Laura" }
+        apellido: { type: string, maxLength: 100, example: "Gómez" }
+        email: { type: string, format: email, example: "operador@predistock.com" }
+        rol_id: { type: integer, example: 2 }
+        bodega_id: { type: integer, nullable: true, example: 2 }
+        activo: { type: boolean, example: true }
+
+    LoginInput:
+      type: object
+      required: [email, password]
+      properties:
+        email: { type: string, format: email, example: "operador@predistock.com" }
+        password: { type: string, format: password, example: "Actual2026*" }
+    LoginRespuesta:
+      type: object
+      properties:
+        access_token: { type: string, example: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..." }
+        token_type: { type: string, example: "Bearer" }
+        expira_en: { type: integer, description: "Segundos de vigencia", example: 7200 }
+        usuario: { $ref: '#/components/schemas/Usuario' }

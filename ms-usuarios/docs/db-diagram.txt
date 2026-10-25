@@ -1,0 +1,30 @@
+Table roles {
+  id int [primary key]
+  nombre varchar(30) [unique]
+  descripcion varchar(255) [null]
+}
+
+Table usuarios {
+  id int [primary key]
+  nombre varchar(100) [not null]
+  apellido varchar(100) [not null]
+  email varchar(100) [unique, not null]
+  password_hash varchar(255) [not null]
+  rol_id int
+  bodega_id int [null, note: "referencia lógica a ms-existencias"]
+  activo boolean [default: true]
+  created_at datetime
+  updated_at datetime
+}
+
+Table tokens_recuperacion {
+  id int [primary key]
+  usuario_id int
+  token_hash varchar(255) [unique]
+  expira_en datetime [not null]
+  usado boolean [default: false]
+  created_at datetime
+}
+
+ref: roles.id <? usuarios.rol_id
+ref: usuarios.id <? tokens_recuperacion.usuario_id
