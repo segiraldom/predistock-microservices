@@ -14,7 +14,7 @@ Table unidades_medida{
 
 Table productos{
   id int [primary key]
-  codigo varchar(10) [unique]
+  codigo varchar(30) [unique]
   nombre varchar(150) [not null]
   descripcion text [null]
   categoria_id int
@@ -40,6 +40,10 @@ Table producto_proveedor {
   proveedor_id int
   precio_compra decimal(14,2)
   es_principal boolean
+
+  indexes {
+    (producto_id, proveedor_id) [pk]
+  }
 }
 
 //Relaciones entre tablas

@@ -1,7 +1,7 @@
 table bodegas {
   id int [primary key]
   codigo varchar(20) [unique]
-  nonmbre varchar(100) [not null]
+  nombre varchar(100) [not null]
   region varchar(50) [not null]
   ciudad varchar(80)
   activa boolean [default: true]
@@ -14,6 +14,10 @@ table existencias {
   cantidad decimal(14,3) [note: ">=0"]
   stock_minimo decimal(14,3)
   stock_maximo decimal(14,3) [null]
+
+  indexes {
+    (producto_id, bodega_id) [unique]
+  }
 }
 
 table lotes {
@@ -31,11 +35,11 @@ table movimientos {
   bodega_id int
   lote_id int [null]
   tipo varchar(20) [not null]
-  cantidad decimal(14,3) [note: ">=0"]
+  cantidad decimal(14,3) [note: ">0"]
   saldo_resultante decimal(14,3)
   orden_compra_id int [null]
   traslado_id int [null]
-  devoluvion_id int [null]
+  devolucion_id int [null]
   usuario_id int [null, note: "Referencia a usuario"]
   motivo varchar(255) [null]
   fecha datetime [not null]
@@ -81,7 +85,7 @@ table devoluciones {
   tipo varchar(10)
   bodega_id int
   proveedor_id int [null]
-  referencia_cliente int [null]
+  referencia_cliente varchar(50) [null]
   motivo varchar(255)
   usuario_id int [note: "usuarios"]
   fecha datetime
@@ -108,4 +112,4 @@ ref: traslados.id <? detalle_traslado.traslado_id
 ref: devoluciones.id <? detalle_devolucion.devolucion_id
 ref: ordenes_compra.id <? movimientos.orden_compra_id
 ref: traslados.id <? movimientos.traslado_id
-ref: devoluciones.id <? movimientos.devoluvion_id
+ref: devoluciones.id <? movimientos.devolucion_id
