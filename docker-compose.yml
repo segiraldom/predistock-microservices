@@ -1,0 +1,76 @@
+services:
+
+  #MS-USUARIOS
+  ms-usuarios:
+    build: ./ms-usuarios
+    container_name: predistock-ms-usuarios
+    restart: unless-stopped
+    ports:
+      - "8001:8001"
+    environment:
+      - PORT=8001
+      - JWT_SECRET=password_2026
+      - DATABASE_URL=postgresql://predi_user:predi_password@autentificacion-db:5432/autentificacion_db
+    volumes:
+      - ./ms-usuarios:/app
+    depends_on:
+      autentificacion-db:
+        condition: service_healthy
+
+  autentificacion-db:
+    image: postgres:15-alpine
+    container_name: predistock-autentificacion-db
+    environment:
+      POSTGRES_DB: autentificacion_db
+      POSTGRES_USER: predi_user
+      POSTGRES_PASSWORD: predi_password
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_autentificacion_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U predi_user -d autentificacion_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+  
+  #MS-ANALITICA
+  ms-analitica:
+    build: ./ms-analitica/
+    container_name: predistock-ms-analitica
+    restart: unless-stopped
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgresql://predi_user:predi_password@analitica-db:5432/analitica_db
+      - EXISTENCIAS_SERVICE_URL=http://localhost:8000/api
+      - MODELS_STORAGE_PATH=/app/models
+      - FLASK_ENV=development
+    volumes:
+      - ./ms-analitica:/app
+      - ./models_storage:/app/models # Persistencia de modelos en el host (RNFM_02)
+    depends_on:
+      analitica-db:
+        condition: service_healthy
+
+  analitica-db:
+    image: postgres:15-alpine
+    container_name: predistock-analitica-db
+    environment:
+      POSTGRES_DB: analitica_db
+      POSTGRES_USER: predi_user
+      POSTGRES_PASSWORD: predi_password
+    ports:
+      - "5434:5432" # Puerto 5434 hacia el host para no colisionar con otros Postgres
+    volumes:
+      - postgres_analitica_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U predi_user -d analitica_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  postgres_analitica_data:
+  postgres_autentificacion_data:
+  models_storage:
