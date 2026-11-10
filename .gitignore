@@ -1,0 +1,12 @@
+# Dependencias y entornos
+node_modules/
+__pycache__/
+*.pyc
+.pytest_cache/
+.env
+
+# Modelos entrenados locales
+models_storage/*.joblib
+
+# Datos persistentes de Docker locales
+postgres_*_data/
