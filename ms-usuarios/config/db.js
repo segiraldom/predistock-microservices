@@ -39,14 +39,12 @@ const initDb = async () => {
   `;
 
   try {
-    await pool.query(queryDDL);
-
-    // Precarga de roles base para PrediStock (RF07)
     await pool.query(`
-      INSERT INTO roles (id, nombre, descripcion) VALUES
-      (1, 'Administrador', 'Control total de la plataforma y analítica'),
-      (2, 'Operador de Bodega', 'Gestión de existencias y pedidos')
-      ON CONFLICT (id) DO NOTHING;
+        INSERT INTO roles (id, nombre, descripcion) VALUES
+        (1, 'ADMIN', 'Control total de la plataforma y administracion general'),
+        (2, 'OPERADOR_BODEGA', 'Control de existencias, recepcion y traslados'),
+        (3, 'ANALISTA', 'Consulta y ejecucion de modelos predictivos y analitica')
+        ON CONFLICT (id) DO UPDATE SET nombre = EXCLUDED.nombre;
     `);
 
     // Precarga de usuario administrador inicial

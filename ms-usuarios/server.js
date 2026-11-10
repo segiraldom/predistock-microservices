@@ -15,13 +15,14 @@ app.get('/health', (req, res) => {
 });
 
 // Registro de endpoints modularizados
-app.use('/api/v1/auth', authRoutes);
-app.use('/api/v1', userRoutes);
+app.use('/auth', authRoutes);
+app.use('/api/usuarios/auth', authRoutes);
+app.use('/api/usuarios', userRoutes);
 
 // Inicializar esquemas en la base de datos
 initDb();
 
-const PORT = process.env.PORT || 8001;
+const PORT = process.env.PORT || 3000;
 
 if (process.env.NODE_ENV !== 'test') {
   app.listen(PORT, () => {

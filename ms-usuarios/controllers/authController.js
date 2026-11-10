@@ -24,7 +24,7 @@ const login = async (req, res) => {
       return res.status(401).json({ error: 'Credenciales inválidas.' });
     }
 
-    // Payload con rol y bodega para inyección en el Gateway
+    // Payload con rol y bodega para autorización en el Gateway
     const tokenPayload = {
       sub: user.id,
       email: user.email,
@@ -53,9 +53,9 @@ const login = async (req, res) => {
   }
 };
 
-// RF08: Perfil del usuario activo (aprovecha la cabecera X-User-Id enviada por el Gateway)
+// RF08: Perfil del usuario activo
 const getProfile = async (req, res) => {
-  const userId = req.headers['x-user-id'];
+  const userId = req.headers['x-usuario-id'] || req.headers['x-user-id'];
 
   if (!userId) {
     return res.status(401).json({ error: 'Contexto de usuario no proporcionado.' });
@@ -80,7 +80,7 @@ const getProfile = async (req, res) => {
   }
 };
 
-// RF08: Solicitar recuperación de contraseña (generación de token temporal)
+// RF08: Solicitar recuperación de contraseña (token temporal)
 const forgotPassword = async (req, res) => {
   const { email } = req.body;
   if (!email) {
@@ -94,7 +94,6 @@ const forgotPassword = async (req, res) => {
     );
 
     if (userRes.rows.length === 0) {
-      // Mensaje genérico por seguridad
       return res.json({ message: 'Si el correo está registrado, se enviará el token de restablecimiento.' });
     }
 
@@ -110,7 +109,7 @@ const forgotPassword = async (req, res) => {
 
     return res.json({
       message: 'Token de recuperación generado.',
-      reset_token: rawToken // Devuelto directamente para pruebas locales
+      reset_token: rawToken
     });
   } catch (err) {
     return res.status(500).json({ error: 'Error en recuperación: ' + err.message });
@@ -158,7 +157,7 @@ const resetPassword = async (req, res) => {
 
 // RF08: Cambio de contraseña para usuario autenticado
 const changePassword = async (req, res) => {
-  const userId = req.headers['x-user-id'];
+  const userId = req.headers['x-usuario-id'] || req.headers['x-user-id'];
   const { current_password, new_password } = req.body;
 
   if (!userId) {
@@ -187,10 +186,16 @@ const changePassword = async (req, res) => {
   }
 };
 
+// RF08: Logout (JWT stateless: el cliente descarta el token localmente)
+const logout = async (req, res) => {
+  return res.json({ message: 'Sesión finalizada con éxito.' });
+};
+
 module.exports = {
   login,
   getProfile,
   forgotPassword,
   resetPassword,
   changePassword,
+  logout,
 };

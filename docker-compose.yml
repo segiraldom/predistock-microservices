@@ -1,14 +1,28 @@
 services:
+  #API-GATEWAY: 8000
+  api-gateway:
+    build: ./api-gateway
+    container_name: predistock-api-gateway
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - USUARIOS_SERVICE_URL=http://ms-usuarios:3000
+      - ANALYTICS_SERVICE_URL=http://ms-analitica:5000
+      - JWT_SECRET=password_2026
+    depends_on:
+      - ms-usuarios
+      - ms-analitica
 
-  #MS-USUARIOS
+  #MS-USUARIOS: 3000
   ms-usuarios:
     build: ./ms-usuarios
     container_name: predistock-ms-usuarios
     restart: unless-stopped
     ports:
-      - "8001:8001"
+      - "3000:3000"
     environment:
-      - PORT=8001
+      - PORT=3000
       - JWT_SECRET=password_2026
       - DATABASE_URL=postgresql://predi_user:predi_password@autentificacion-db:5432/autentificacion_db
     volumes:
@@ -34,7 +48,7 @@ services:
       timeout: 5s
       retries: 5
   
-  #MS-ANALITICA
+  #MS-ANALITICA: 5000
   ms-analitica:
     build: ./ms-analitica/
     container_name: predistock-ms-analitica
