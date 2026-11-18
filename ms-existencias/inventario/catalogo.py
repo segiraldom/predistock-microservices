@@ -85,3 +85,17 @@ def nombres_productos(ids):
         if producto:
             nombres[pid] = producto.get("nombre")
     return nombres
+
+
+def es_perecedero(producto_id):
+    """True/False según catálogo; None si no se sabe (validación desactivada o catálogo caído).
+
+    Nunca lanza errores: un movimiento no debe fallar porque catálogo no responda.
+    """
+    if not settings.CATALOGO_VALIDACION or cache.get(CLAVE_CAIDO):
+        return None
+    try:
+        producto = obtener_producto(producto_id, exigir_activo=False)
+    except ErrorNegocio:
+        return None
+    return bool(producto.get("es_perecedero")) if producto else None

@@ -66,6 +66,8 @@ CATALOGO_SERVICE_URL = os.getenv("CATALOGO_SERVICE_URL", "http://ms-catalogo:800
 CATALOGO_VALIDACION = os.getenv("CATALOGO_VALIDACION", "true").lower() == "true"
 NOTIFICACIONES_SERVICE_URL = os.getenv("NOTIFICACIONES_SERVICE_URL", "http://ms-notificaciones:5001/api/notifications")
 HTTP_TIMEOUT = float(os.getenv("HTTP_TIMEOUT", "3"))
+# Las alertas se envían en un hilo aparte para no demorar la respuesta del movimiento
+NOTIFICACIONES_ASINCRONO = os.getenv("NOTIFICACIONES_ASINCRONO", "true").lower() == "true"
 
 LOGGING = {
     "version": 1,

@@ -7,7 +7,8 @@ from inventario.models import Bodega
 PREFIJO = "/api/existencias"
 
 
-@override_settings(CATALOGO_VALIDACION=False)
+@override_settings(CATALOGO_VALIDACION=False, NOTIFICACIONES_ASINCRONO=False,
+                   NOTIFICACIONES_SERVICE_URL="http://notif/api/notifications")
 class BaseAPITest(TestCase):
     """Cliente que simula las cabeceras que agrega el API Gateway tras validar el JWT."""
 

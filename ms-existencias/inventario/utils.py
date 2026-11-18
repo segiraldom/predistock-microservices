@@ -46,3 +46,23 @@ def obtener_o_404(modelo, pk, descripcion):
     if objeto is None:
         raise ErrorNegocio(404, "NO_ENCONTRADO", f"{descripcion} {pk} no existe")
     return objeto
+
+
+def param_fecha(query_params, nombre, obligatorio=False):
+    from datetime import date
+    valor = query_params.get(nombre)
+    if not valor:
+        if obligatorio:
+            raise ErrorNegocio(400, "DATOS_INVALIDOS", f"El parámetro '{nombre}' es obligatorio (AAAA-MM-DD)")
+        return None
+    try:
+        return date.fromisoformat(valor)
+    except ValueError:
+        raise ErrorNegocio(400, "DATOS_INVALIDOS", f"El parámetro '{nombre}' debe tener formato AAAA-MM-DD")
+
+
+def param_opcion(query_params, nombre, opciones):
+    valor = query_params.get(nombre)
+    if valor and valor not in opciones:
+        raise ErrorNegocio(400, "DATOS_INVALIDOS", f"El parámetro '{nombre}' debe ser uno de: {', '.join(sorted(opciones))}")
+    return valor or None

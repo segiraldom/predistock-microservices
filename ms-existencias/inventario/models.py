@@ -53,6 +53,7 @@ class Lote(models.Model):
         db_table = "lotes"
         constraints = [
             models.CheckConstraint(condition=Q(cantidad__gte=0), name="ck_lote_cantidad_no_negativa"),
+            models.UniqueConstraint(fields=["producto_id", "bodega", "numero_lote"], name="uq_lote_producto_bodega_numero"),
         ]
         indexes = [models.Index(fields=["fecha_vencimiento"], name="ix_lote_vencimiento")]
 
