@@ -70,11 +70,11 @@ def obtener_proveedor(proveedor_id, exigir_activo=True):
     return _obtener("proveedores", proveedor_id, exigir_activo)
 
 
-def nombres_productos(ids):
-    """{producto_id: nombre} para enriquecer respuestas. Nunca lanza errores."""
+def datos_productos(ids):
+    """{producto_id: dict de catálogo} para enriquecer respuestas. Nunca lanza errores."""
     if not settings.CATALOGO_VALIDACION or cache.get(CLAVE_CAIDO):
         return {}
-    nombres = {}
+    datos = {}
     for pid in ids:
         try:
             producto = obtener_producto(pid, exigir_activo=False)
@@ -83,8 +83,32 @@ def nombres_productos(ids):
                 break  # no seguir esperando timeouts: RNF06
             continue
         if producto:
-            nombres[pid] = producto.get("nombre")
-    return nombres
+            datos[pid] = producto
+    return datos
+
+
+def nombres_productos(ids):
+    return {pid: p.get("nombre") for pid, p in datos_productos(ids).items()}
+
+
+def costos_productos(ids):
+    """{producto_id: Decimal costo}. Estricto: sin catálogo no hay valorización (503, contrato RF11)."""
+    from decimal import Decimal
+
+    if not settings.CATALOGO_VALIDACION:
+        raise ErrorNegocio(503, "CATALOGO_NO_DISPONIBLE",
+                           "La valorización requiere el costo de los productos y la consulta a catálogo está desactivada")
+    costos = {}
+    for pid in ids:
+        try:
+            producto = obtener_producto(pid, exigir_activo=False)
+        except ErrorNegocio as exc:
+            if exc.status != 422:
+                raise
+            log.warning("Producto %s sin registro en catálogo: se valoriza en 0", pid)
+            producto = {}
+        costos[pid] = Decimal(str(producto.get("costo") or 0))
+    return costos
 
 
 def es_perecedero(producto_id):

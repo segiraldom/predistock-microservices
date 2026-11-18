@@ -5,6 +5,7 @@ from .views.devoluciones import DevolucionDetalleView, DevolucionesView
 from .views.lotes import LoteDetalleView, LotesView
 from .views.movimientos import HistoricoView, MovimientosView
 from .views.ordenes import OrdenDetalleView, OrdenEstadoView, OrdenesView, RecepcionesView
+from .views.reportes import ReporteExistenciasView, ReporteRotacionView, ReporteValorizacionView
 from .views.salud import salud
 from .views.stock import StockView, UmbralView
 from .views.traslados import TrasladoDetalleView, TrasladosView
@@ -34,4 +35,8 @@ urlpatterns = [
     # Devoluciones (RF13)
     path("devoluciones", DevolucionesView.as_view()),
     path("devoluciones/<int:pk>", DevolucionDetalleView.as_view()),
+    # Reportes (RF11)
+    path("reportes/existencias", ReporteExistenciasView.as_view()),
+    path("reportes/valorizacion", ReporteValorizacionView.as_view()),
+    path("reportes/rotacion", ReporteRotacionView.as_view()),
 ]
