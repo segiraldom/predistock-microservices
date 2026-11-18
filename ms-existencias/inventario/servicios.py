@@ -13,6 +13,8 @@ from .models import Bodega, Existencia, Lote, Movimiento
 
 TIPOS_ENTRADA = Movimiento.TIPOS_ENTRADA
 TIPOS_CON_LOTE_OBLIGATORIO = {"ENTRADA", "AJUSTE_ENTRADA"}
+# Las devoluciones a proveedor sí pueden llevarse lotes vencidos
+TIPOS_SIN_VENCIDOS = {"SALIDA", "TRASLADO_SALIDA"}
 
 
 def texto(valor):
@@ -28,16 +30,16 @@ def stock_insuficiente(disponible, solicitado, producto_id, bodega_id, detalle="
     )
 
 
-def bodega_operable(identidad, bodega_id):
+def bodega_operable(identidad, bodega_id, restringir_operador=True):
     """Bodega existente y activa; un operador solo puede operar la bodega asignada en su token."""
     bodega = Bodega.objects.filter(pk=bodega_id).first()
     if bodega is None:
         raise ErrorNegocio(400, "DATOS_INVALIDOS", f"La bodega {bodega_id} no existe")
     if not bodega.activa:
         raise ErrorNegocio(400, "BODEGA_INACTIVA", f"La bodega {bodega_id} está inactiva")
-    if identidad.rol == OPERADOR_BODEGA and identidad.bodega_id != bodega.pk:
+    if restringir_operador and identidad.rol == OPERADOR_BODEGA and identidad.bodega_id != bodega.pk:
         raise ErrorNegocio(403, "BODEGA_NO_ASIGNADA",
-                           f"El operador solo puede registrar movimientos en su bodega asignada")
+                           "El operador solo puede registrar movimientos en su bodega asignada")
     return bodega
 
 
@@ -99,7 +101,7 @@ def _consumos_de_salida(tipo, existencia, cantidad, perecedero, lote_id):
     if not usar_lotes:
         return [(None, cantidad)]
 
-    if tipo == "SALIDA":  # no se despachan lotes vencidos; para darlos de baja se usa AJUSTE_SALIDA
+    if tipo in TIPOS_SIN_VENCIDOS:  # no se despachan ni trasladan lotes vencidos; se dan de baja con AJUSTE_SALIDA
         lotes = lotes.filter(fecha_vencimiento__gte=timezone.localdate())
 
     consumos, pendiente = [], cantidad

@@ -122,3 +122,169 @@ class LoteSerializer(serializers.ModelSerializer):
 class LoteCorreccionSerializer(serializers.Serializer):
     numero_lote = serializers.CharField(required=False, max_length=30, allow_blank=False)
     fecha_vencimiento = serializers.DateField(required=False)
+
+
+# ---------- Documentos: traslados, devoluciones, órdenes de compra (RF04, RF06, RF13) ----------
+
+from .models import (DetalleDevolucion, DetalleOrdenCompra, DetalleTraslado,  # noqa: E402
+                     Devolucion, OrdenCompra, Traslado)
+
+
+class CantidadPositiva(serializers.DecimalField):
+    def __init__(self, **kwargs):
+        super().__init__(**CANTIDAD, **kwargs)
+
+    def to_internal_value(self, data):
+        valor = super().to_internal_value(data)
+        if valor <= 0:
+            raise serializers.ValidationError("Debe ser mayor que cero")
+        return valor
+
+
+def _sin_productos_repetidos(lineas, campo="producto_id"):
+    vistos = [l[campo] for l in lineas]
+    if len(vistos) != len(set(vistos)):
+        raise serializers.ValidationError(f"Hay {campo} repetidos en el detalle; agrupe las cantidades en una sola línea")
+    return lineas
+
+
+# Traslados
+
+class LineaTrasladoSerializer(serializers.Serializer):
+    producto_id = serializers.IntegerField(min_value=1)
+    cantidad = CantidadPositiva()
+
+
+class TrasladoInputSerializer(serializers.Serializer):
+    bodega_origen_id = serializers.IntegerField(min_value=1)
+    bodega_destino_id = serializers.IntegerField(min_value=1)
+    sugerencia_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    detalle = LineaTrasladoSerializer(many=True, allow_empty=False)
+
+    def validate_detalle(self, lineas):
+        return _sin_productos_repetidos(lineas)
+
+    def validate(self, data):
+        if data["bodega_origen_id"] == data["bodega_destino_id"]:
+            raise serializers.ValidationError({"bodega_destino_id": "La bodega destino debe ser distinta de la origen"})
+        return data
+
+
+class DetalleTrasladoSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DetalleTraslado
+        fields = ["producto_id", "cantidad"]
+
+
+class TrasladoSerializer(serializers.ModelSerializer):
+    bodega_origen_id = serializers.IntegerField(read_only=True)
+    bodega_destino_id = serializers.IntegerField(read_only=True)
+    detalle = DetalleTrasladoSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Traslado
+        fields = ["id", "bodega_origen_id", "bodega_destino_id", "sugerencia_id", "usuario_id", "fecha", "detalle"]
+
+
+# Devoluciones
+
+class LineaDevolucionSerializer(serializers.Serializer):
+    producto_id = serializers.IntegerField(min_value=1)
+    cantidad = CantidadPositiva()
+    condicion = serializers.ChoiceField(choices=DetalleDevolucion.Condicion.values)
+
+
+class DevolucionInputSerializer(serializers.Serializer):
+    tipo = serializers.ChoiceField(choices=Devolucion.Tipo.values)
+    bodega_id = serializers.IntegerField(min_value=1)
+    proveedor_id = serializers.IntegerField(required=False, allow_null=True, min_value=1)
+    referencia_cliente = serializers.CharField(required=False, allow_null=True, allow_blank=True, max_length=50)
+    motivo = serializers.CharField(max_length=255)
+    detalle = LineaDevolucionSerializer(many=True, allow_empty=False)
+
+    def validate_detalle(self, lineas):
+        claves = [(l["producto_id"], l["condicion"]) for l in lineas]
+        if len(claves) != len(set(claves)):
+            raise serializers.ValidationError("Hay productos repetidos con la misma condición en el detalle")
+        return lineas
+
+    def validate(self, data):
+        if data["tipo"] == "PROVEEDOR" and not data.get("proveedor_id"):
+            raise serializers.ValidationError({"proveedor_id": "Es obligatorio en devoluciones a proveedor"})
+        if data["tipo"] == "CLIENTE":
+            data["proveedor_id"] = None
+        else:
+            data["referencia_cliente"] = None
+        return data
+
+
+class DetalleDevolucionSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DetalleDevolucion
+        fields = ["producto_id", "cantidad", "condicion"]
+
+
+class DevolucionSerializer(serializers.ModelSerializer):
+    bodega_id = serializers.IntegerField(read_only=True)
+    detalle = DetalleDevolucionSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = Devolucion
+        fields = ["id", "tipo", "bodega_id", "proveedor_id", "referencia_cliente", "motivo",
+                  "usuario_id", "fecha", "detalle"]
+
+
+# Órdenes de compra
+
+class LineaOrdenInputSerializer(serializers.Serializer):
+    producto_id = serializers.IntegerField(min_value=1)
+    cantidad_solicitada = CantidadPositiva()
+    precio_unitario = serializers.DecimalField(max_digits=14, decimal_places=2, min_value=0)
+
+
+class OrdenCompraInputSerializer(serializers.Serializer):
+    proveedor_id = serializers.IntegerField(min_value=1)
+    bodega_id = serializers.IntegerField(min_value=1)
+    detalle = LineaOrdenInputSerializer(many=True, allow_empty=False)
+
+    def validate_detalle(self, lineas):
+        return _sin_productos_repetidos(lineas)
+
+
+class LineaOrdenSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = DetalleOrdenCompra
+        fields = ["id", "producto_id", "cantidad_solicitada", "cantidad_recibida", "precio_unitario"]
+
+
+class OrdenCompraSerializer(serializers.ModelSerializer):
+    bodega_id = serializers.IntegerField(read_only=True)
+    detalle = LineaOrdenSerializer(many=True, read_only=True)
+
+    class Meta:
+        model = OrdenCompra
+        fields = ["id", "numero", "proveedor_id", "bodega_id", "estado", "fecha_emision", "creada_por", "detalle"]
+
+
+class EstadoOrdenInputSerializer(serializers.Serializer):
+    estado = serializers.ChoiceField(choices=["CANCELADA"],
+                                     error_messages={"invalid_choice": "Solo se puede cambiar manualmente a CANCELADA"})
+
+
+class LineaRecepcionSerializer(serializers.Serializer):
+    detalle_id = serializers.IntegerField(min_value=1)
+    cantidad = CantidadPositiva()
+    numero_lote = serializers.CharField(required=False, max_length=30, allow_blank=False)
+    fecha_vencimiento = serializers.DateField(required=False)
+
+    def validate(self, data):
+        if bool(data.get("numero_lote")) != bool(data.get("fecha_vencimiento")):
+            raise serializers.ValidationError({"fecha_vencimiento": "numero_lote y fecha_vencimiento van juntos"})
+        return data
+
+
+class RecepcionInputSerializer(serializers.Serializer):
+    lineas = LineaRecepcionSerializer(many=True, allow_empty=False)
+
+    def validate_lineas(self, lineas):
+        return _sin_productos_repetidos(lineas, campo="detalle_id")
