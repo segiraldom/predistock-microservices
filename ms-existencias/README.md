@@ -38,3 +38,64 @@ Contrato OpenAPI: [`docs/existencias-openapi.yaml`](docs/existencias-openapi.yam
 ![Métodos](docs/Contratos_api/Metodos.png)
 
 Capturas por grupo en [`docs/Contratos_api/`](docs/Contratos_api/): Bodegas, Stock, Movimientos, Lotes, Órdenes de compra, Traslados, Devoluciones, Reportes y Schemas.
+
+## Cómo se ejecuta
+
+El servicio corre dentro del `docker-compose.yml` de la raíz del repositorio:
+
+```bash
+docker compose up -d --build existencias-db ms-existencias
+docker compose ps                                   # ms-existencias debe quedar "healthy"
+docker compose logs -f ms-existencias
+```
+
+Al iniciar, el contenedor aplica las migraciones y arranca gunicorn en el puerto 8002.
+
+**El puerto 8002 no se publica hacia el computador.** El servicio no valida el JWT: confía en las cabeceras `X-Usuario-Id`, `X-Rol` y `X-Bodega-Id` que agrega el API Gateway, así que solo debe ser alcanzable desde la red interna. Para usarlo desde fuera, entrar por el Gateway (`http://localhost:8000/api/existencias/...`). Solo para depurar, agregar temporalmente `ports: ["8002:8002"]` al servicio en el compose.
+
+### Variables de entorno
+
+| Variable | Valor por defecto | Para qué sirve |
+|---|---|---|
+| `DATABASE_URL` | SQLite local (solo desarrollo y pruebas) | Conexión a `existencias_db` |
+| `DJANGO_SECRET_KEY` | clave de desarrollo | Debe cambiarse fuera de desarrollo |
+| `DJANGO_DEBUG` | `false` | |
+| `CATALOGO_SERVICE_URL` | `http://ms-catalogo:8001/api/catalogo` | Validar productos y proveedores, y leer el costo |
+| `CATALOGO_VALIDACION` | `true` | Con `false` no se consulta catálogo (desarrollo sin `ms-catalogo`) |
+| `NOTIFICACIONES_SERVICE_URL` | `http://ms-notificaciones:5001/api/notifications` | Destino de las alertas de stock bajo (`POST {url}/alerts`) |
+| `NOTIFICACIONES_ASINCRONO` | `true` | Envía la alerta en un hilo aparte |
+| `HTTP_TIMEOUT` | `3` | Segundos de espera a otros microservicios |
+
+Hay una plantilla en [`.env.example`](.env.example).
+
+## Pruebas
+
+Pruebas automáticas de comportamiento, en [`inventario/tests/`](inventario/tests/). Son distintas de las pruebas de rendimiento con Locust.
+
+```bash
+docker compose exec ms-existencias python manage.py test inventario
+```
+
+Son 98 pruebas: bodegas, stock, movimientos (saldo, lotes FEFO, permisos, alertas, kardex), traslados, devoluciones, órdenes de compra, reportes y la integración con catálogo simulada. Una de ellas lanza dos salidas simultáneas sobre el mismo saldo para comprobar el bloqueo de fila, y solo se ejecuta sobre PostgreSQL.
+
+## Reglas de negocio
+
+- **Todo cambio de stock es un movimiento.** Se escribe en una sola transacción: se bloquea la fila de `existencias` (`SELECT ... FOR UPDATE`), se valida el saldo, se inserta el movimiento y se actualiza el saldo. Dos salidas simultáneas no pueden dejar el stock negativo.
+- **FEFO.** Una salida sin `lote_id` descuenta primero el lote que vence antes y genera un movimiento por cada lote consumido. Las salidas y los traslados no toman lotes vencidos; se dan de baja con un ajuste.
+- **Documentos atómicos.** Un traslado, una devolución o una recepción de orden de compra se confirman completos o no se confirman. El lote viaja con la mercancía en los traslados.
+- **Permisos.** Un operador solo opera sobre la bodega de su token; crear bodegas, órdenes, umbrales y corregir lotes es solo para ADMIN.
+- **Alerta de stock bajo (RF09).** Si una salida deja el saldo por debajo del mínimo, se avisa a ms-notificaciones una vez guardado el movimiento. Si notificaciones no responde, el movimiento no se ve afectado.
+- **Tolerancia a fallos de catálogo.** Al crear (stock, órdenes, devoluciones a proveedor) catálogo se consulta y su caída produce `503`. Al consultar, el nombre del producto se omite y la consulta sigue respondiendo.
+
+## Integración con otros servicios
+
+| Servicio | Relación |
+|---|---|
+| ms-catalogo | Existencias lo consulta por HTTP: existencia y estado del producto o proveedor, si es perecedero, y su costo para la valorización |
+| ms-notificaciones | Existencias le envía la alerta de stock bajo |
+| ms-analitica | Consume `GET /api/existencias/movimientos/historico` para entrenar sus modelos |
+| API Gateway | Único punto de entrada; valida el JWT y reenvía la identidad en cabeceras |
+
+## Diferencias respecto al contrato original
+
+El contrato de la Entrega 2 se actualizó con estos puntos que surgieron al implementar: `GET /health`, `GET /movimientos/historico`, las cabeceras `X-Total-Count` y `X-Movimientos-Ids`, y que el reporte de existencias no falla (`503`) si catálogo está caído. Las capturas de `docs/Contratos_api/` corresponden a la versión anterior del contrato.
