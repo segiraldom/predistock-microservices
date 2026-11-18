@@ -9,10 +9,12 @@ services:
     environment:
       - USUARIOS_SERVICE_URL=http://ms-usuarios:3000
       - ANALYTICS_SERVICE_URL=http://ms-analitica:5000
+      - EXISTENCIAS_SERVICE_URL=http://ms-existencias:8002
       - JWT_SECRET=password_2026
     depends_on:
       - ms-usuarios
       - ms-analitica
+      - ms-existencias
 
   #MS-USUARIOS: 3000
   ms-usuarios:
@@ -57,7 +59,7 @@ services:
       - "5000:5000"
     environment:
       - DATABASE_URL=postgresql://predi_user:predi_password@analitica-db:5432/analitica_db
-      - EXISTENCIAS_SERVICE_URL=http://localhost:8000/api
+      - EXISTENCIAS_SERVICE_URL=http://ms-existencias:8002/api/existencias
       - MODELS_STORAGE_PATH=/app/models
       - FLASK_ENV=development
     volumes:
@@ -84,7 +86,52 @@ services:
       timeout: 5s
       retries: 5
 
+  #MS-EXISTENCIAS: 8002
+  ms-existencias:
+    build: ./ms-existencias
+    container_name: predistock-ms-existencias
+    restart: unless-stopped
+    # Sin "ports": solo es accesible por la red interna. El servicio confía en las cabeceras
+    # X-Usuario-Id / X-Rol / X-Bodega-Id que pone el Gateway, así que no debe exponerse.
+    # Para probarlo directo en desarrollo, agregar temporalmente: ports: ["8002:8002"]
+    expose:
+      - "8002"
+    environment:
+      - DATABASE_URL=postgresql://predi_user:predi_password@existencias-db:5432/existencias_db
+      - DJANGO_SECRET_KEY=existencias_dev_2026
+      - DJANGO_DEBUG=false
+      - CATALOGO_SERVICE_URL=http://ms-catalogo:8001/api/catalogo
+      - CATALOGO_VALIDACION=false # cambiar a true cuando ms-catalogo esté implementado
+      - NOTIFICACIONES_SERVICE_URL=http://ms-notificaciones:5001/api/notifications
+    depends_on:
+      existencias-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8002/api/existencias/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  existencias-db:
+    image: postgres:15-alpine
+    container_name: predistock-existencias-db
+    environment:
+      POSTGRES_DB: existencias_db
+      POSTGRES_USER: predi_user
+      POSTGRES_PASSWORD: predi_password
+    ports:
+      - "5435:5432" # Puerto 5435 hacia el host para no colisionar con los otros Postgres
+    volumes:
+      - postgres_existencias_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U predi_user -d existencias_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
 volumes:
   postgres_analitica_data:
   postgres_autentificacion_data:
+  postgres_existencias_data:
   models_storage:

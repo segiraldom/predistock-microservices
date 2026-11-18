@@ -1,7 +1,7 @@
 """Configuración de ms-existencias (PrediStock). Todo lo variable viene de entorno."""
 import os
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -36,7 +36,8 @@ def _database_from_url(url):
         "NAME": u.path.lstrip("/"),
         "USER": u.username,
         "PASSWORD": u.password,
-        "HOST": u.hostname,
+        # ?host=/ruta/socket permite conectarse por socket Unix
+        "HOST": parse_qs(u.query).get("host", [u.hostname])[0],
         "PORT": u.port or 5432,
     }
 

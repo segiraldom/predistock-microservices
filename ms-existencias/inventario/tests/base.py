@@ -10,12 +10,18 @@ PREFIJO = "/api/existencias"
 @override_settings(CATALOGO_VALIDACION=False, NOTIFICACIONES_ASINCRONO=False,
                    NOTIFICACIONES_SERVICE_URL="http://notif/api/notifications")
 class BaseAPITest(TestCase):
-    """Cliente que simula las cabeceras que agrega el API Gateway tras validar el JWT."""
+    """
+    Cliente que simula las cabeceras que agrega el API Gateway tras validar el JWT.
+
+    El operador queda asignado a la primera bodega que cree el test. No se asume que
+    esa bodega tenga id 1: en PostgreSQL las secuencias no se reinician entre tests.
+    """
 
     def setUp(self):
         cache.clear()
         self.admin = self.cliente("ADMIN", usuario_id=1)
-        self.operador = self.cliente("OPERADOR_BODEGA", usuario_id=2, bodega_id=1)
+        self.operador = self.cliente("OPERADOR_BODEGA", usuario_id=2)
+        self._bodega_operador = None
 
     @staticmethod
     def cliente(rol, usuario_id=1, bodega_id=None):
@@ -26,8 +32,11 @@ class BaseAPITest(TestCase):
         c.credentials(**headers)
         return c
 
-    @staticmethod
-    def crear_bodega(codigo="BOD-MZL", **kwargs):
+    def crear_bodega(self, codigo="BOD-MZL", **kwargs):
         datos = {"nombre": "Bodega Manizales", "region": "Centro", "ciudad": "Manizales"}
         datos.update(kwargs)
-        return Bodega.objects.create(codigo=codigo, **datos)
+        bodega = Bodega.objects.create(codigo=codigo, **datos)
+        if self._bodega_operador is None:
+            self._bodega_operador = bodega
+            self.operador = self.cliente("OPERADOR_BODEGA", usuario_id=2, bodega_id=bodega.id)
+        return bodega

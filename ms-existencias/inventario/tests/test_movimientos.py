@@ -20,7 +20,7 @@ HOY = date.today()
 class MovimientosBase(BaseAPITest):
     def setUp(self):
         super().setUp()
-        self.bodega = self.crear_bodega()  # id 1 = bodega del operador
+        self.bodega = self.crear_bodega()  # primera bodega = bodega del operador
         self.existencia = Existencia.objects.create(producto_id=12, bodega=self.bodega, cantidad=0, stock_minimo=10)
 
     def mover(self, tipo, cantidad, cliente=None, **extra):
@@ -52,7 +52,7 @@ class SaldoTest(MovimientosBase):
         r = self.mover("SALIDA", 120)
         self.assertEqual(r.status_code, 409)
         self.assertEqual(r.json(), {"error": "STOCK_INSUFICIENTE",
-                                    "mensaje": "Disponible 80, solicitado 120 (producto 12, bodega 1)"})
+                                    "mensaje": f"Disponible 80, solicitado 120 (producto 12, bodega {self.bodega.id})"})
         self.assertEqual(self.saldo(), 80)
         self.assertEqual(Movimiento.objects.count(), 1)
 
