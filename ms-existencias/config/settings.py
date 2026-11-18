@@ -56,7 +56,10 @@ REST_FRAMEWORK = {
     "DEFAULT_RENDERER_CLASSES": ["rest_framework.renderers.JSONRenderer"],
     "DEFAULT_PARSER_CLASSES": ["rest_framework.parsers.JSONParser"],
     "EXCEPTION_HANDLER": "inventario.errores.manejador_excepciones",
+    "COERCE_DECIMAL_TO_STRING": False,  # el contrato define las cantidades como number
 }
+
+APPEND_SLASH = False  # el Gateway reenvía rutas sin barra final
 
 # Integración con otros microservicios (RNF02: nunca por base de datos)
 CATALOGO_SERVICE_URL = os.getenv("CATALOGO_SERVICE_URL", "http://ms-catalogo:8001/api/catalogo")

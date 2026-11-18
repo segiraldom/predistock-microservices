@@ -1,3 +1,1 @@
-from django.contrib import admin
-
-# Register your models here.
+# Este servicio no usa el admin de Django.
