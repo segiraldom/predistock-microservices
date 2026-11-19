@@ -9,11 +9,13 @@ services:
     environment:
       - USUARIOS_SERVICE_URL=http://ms-usuarios:3000
       - ANALYTICS_SERVICE_URL=http://ms-analitica:5000
+      - CATALOGO_SERVICE_URL=http://ms-catalogo:8001
       - EXISTENCIAS_SERVICE_URL=http://ms-existencias:8002
       - JWT_SECRET=password_2026
     depends_on:
       - ms-usuarios
       - ms-analitica
+      - ms-catalogo
       - ms-existencias
 
   #MS-USUARIOS: 3000
@@ -86,6 +88,47 @@ services:
       timeout: 5s
       retries: 5
 
+  #MS-CATALOGO: 8001
+  ms-catalogo:
+    build: ./ms-catalogo
+    container_name: predistock-ms-catalogo
+    restart: unless-stopped
+    # Sin "ports": solo es accesible por la red interna. El servicio confía en las cabeceras
+    # X-Usuario-Id / X-Rol que pone el Gateway, así que no debe exponerse.
+    # Para probarlo directo en desarrollo, agregar temporalmente: ports: ["8001:8001"]
+    expose:
+      - "8001"
+    environment:
+      - DATABASE_URL=postgresql://predi_user:predi_password@catalogo-db:5432/catalogo_db
+      - DJANGO_SECRET_KEY=catalogo_dev_2026
+      - DJANGO_DEBUG=false
+    depends_on:
+      catalogo-db:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fs http://localhost:8001/api/catalogo/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  catalogo-db:
+    image: postgres:15-alpine
+    container_name: predistock-catalogo-db
+    environment:
+      POSTGRES_DB: catalogo_db
+      POSTGRES_USER: predi_user
+      POSTGRES_PASSWORD: predi_password
+    ports:
+      - "5436:5432" # Puerto 5436 hacia el host para no colisionar con los otros Postgres
+    volumes:
+      - postgres_catalogo_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U predi_user -d catalogo_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   #MS-EXISTENCIAS: 8002
   ms-existencias:
     build: ./ms-existencias
@@ -133,5 +176,6 @@ services:
 volumes:
   postgres_analitica_data:
   postgres_autentificacion_data:
+  postgres_catalogo_data:
   postgres_existencias_data:
   models_storage:
