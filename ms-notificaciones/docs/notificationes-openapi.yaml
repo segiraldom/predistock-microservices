@@ -1,15 +1,24 @@
 openapi: 3.0.3
 info:
   title: "PrediStock - Microservicio de Notificaciones y Alertas"
-  version: "1.0.0"
+  version: "1.1.0"
   description: |
     API del microservicio de notificaciones operativas de PrediStock.
     Recibe eventos en tiempo real disparados por caída de stock bajo el umbral mínimo (RF09) y los retransmite a los clientes y bodegueros.
-    
+
     ### Características de la Arquitectura:
     - **Stateless**: No requiere base de datos ni volumen de almacenamiento persistente montado en Pods.
     - **Desacoplado**: Actúa como un despachador de eventos (Event Dispatcher / Bridge) en tiempo real.
-    - **ClusterIP**: Aislado del tráfico externo directo, consumible internamente por el microservicio de Existencias y el API Gateway.
+    - **ClusterIP**: Aislado del tráfico externo directo, consumible internamente por el microservicio de Existencias.
+
+    ### Uso interno
+    `POST /alerts` solo lo invoca ms-existencias por la red interna, sin cabeceras de identidad.
+    Las peticiones que llegan por el API Gateway traen `X-Usuario-Id` / `X-Rol` y se rechazan con `403`,
+    para que un usuario no pueda fabricar alertas.
+
+    ### Errores
+    Todas las respuestas de error usan el formato uniforme de PrediStock: `{"error": CODIGO, "mensaje": texto}`.
+    En los errores de validación, `mensaje` es un objeto con la lista de errores de cada campo.
 
 
 servers:
@@ -22,10 +31,12 @@ servers:
 tags:
   - name: "Notificaciones"
     description: "Despacho y transmisión de alertas de existencias en tiempo real"
+  - name: "Salud"
+    description: "Verificación de disponibilidad del servicio"
 
 
 paths:
-  /notifications/alerts:
+  /alerts:
     post:
       tags:
         - "Notificaciones"
@@ -45,11 +56,57 @@ paths:
               schema:
                 $ref: '#/components/schemas/DispatchResult'
         '400':
-          description: "Estructura de la alerta inválida o incompleta"
+          description: "Estructura de la alerta inválida o incompleta, o JSON malformado"
           content:
             application/json:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "DATOS_INVALIDOS"
+                mensaje:
+                  product_id: ["Este campo es obligatorio."]
+                  current_stock: ["Debe ser un número mayor o igual a 0."]
+        '403':
+          description: "La petición llegó por el API Gateway (trae X-Usuario-Id o X-Rol); el endpoint es de uso interno"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              example:
+                error: "SIN_PERMISO"
+                mensaje: "Las alertas solo pueden enviarse desde los microservicios internos."
+        '405':
+          description: "Método distinto de POST"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+        '415':
+          description: "El cuerpo no se envió como application/json"
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+
+  /health:
+    get:
+      tags:
+        - "Salud"
+      summary: "Health check para Docker / Kubernetes"
+      responses:
+        '200':
+          description: "El servicio está disponible"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  status:
+                    type: "string"
+                    example: "ok"
+                  servicio:
+                    type: "string"
+                    example: "ms-notificaciones"
 
 
 components:
@@ -69,18 +126,22 @@ components:
           example: "LOW_STOCK_THRESHOLD"
         product_id:
           type: "integer"
+          minimum: 1
           description: "Identificador del producto afectado"
           example: 104
         warehouse_id:
           type: "integer"
+          minimum: 1
           description: "Identificador de la bodega asociada"
           example: 1
         current_stock:
-          type: "integer"
-          description: "Cantidad actual en bodega"
+          type: "number"
+          minimum: 0
+          description: "Cantidad actual en bodega. Entero, o decimal para productos que se manejan en fracciones."
           example: 4
         threshold:
-          type: "integer"
+          type: "number"
+          minimum: 0
           description: "Umbral mínimo configurado que detonó la alerta"
           example: 10
         message:
@@ -109,10 +170,15 @@ components:
       properties:
         error:
           type: "string"
-          example: "BadRequest"
-        message:
-          type: "string"
-          example: "Faltan campos obligatorios para procesar el despacho de la alerta."
-
-
-
+          description: "Código del error: DATOS_INVALIDOS, SIN_PERMISO, NO_ENCONTRADO, METODO_NO_PERMITIDO, TIPO_NO_SOPORTADO o ERROR_INTERNO"
+          example: "DATOS_INVALIDOS"
+        mensaje:
+          description: "Texto del error, o un objeto {campo: [errores]} en los errores de validación"
+          oneOf:
+            - type: "string"
+            - type: "object"
+              additionalProperties:
+                type: "array"
+                items:
+                  type: "string"
+          example: "El cuerpo no es un JSON válido."
