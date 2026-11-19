@@ -11,12 +11,14 @@ services:
       - ANALYTICS_SERVICE_URL=http://ms-analitica:5000
       - CATALOGO_SERVICE_URL=http://ms-catalogo:8001
       - EXISTENCIAS_SERVICE_URL=http://ms-existencias:8002
+      - NOTIFICACIONES_SERVICE_URL=http://ms-notificaciones:5001
       - JWT_SECRET=password_2026
     depends_on:
       - ms-usuarios
       - ms-analitica
       - ms-catalogo
       - ms-existencias
+      - ms-notificaciones
 
   #MS-USUARIOS: 3000
   ms-usuarios:
@@ -149,6 +151,8 @@ services:
     depends_on:
       existencias-db:
         condition: service_healthy
+      ms-notificaciones:
+        condition: service_started # si notificaciones falla, existencias igual opera (las alertas solo se pierden)
     healthcheck:
       test: ["CMD-SHELL", "curl -fs http://localhost:8002/api/existencias/health || exit 1"]
       interval: 10s
@@ -172,6 +176,24 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  #MS-NOTIFICACIONES: 5001
+  ms-notificaciones:
+    build: ./ms-notificaciones
+    container_name: predistock-ms-notificaciones
+    restart: unless-stopped
+    # Sin "ports" ni base de datos: solo lo llama ms-existencias por la red interna.
+    # Para probarlo directo en desarrollo, agregar temporalmente: ports: ["5001:5001"]
+    expose:
+      - "5001"
+    environment:
+      - PORT=5001
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:5001/api/notifications/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
 volumes:
   postgres_analitica_data:
