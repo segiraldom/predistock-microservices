@@ -66,7 +66,7 @@ Al iniciar, el contenedor aplica las migraciones y arranca gunicorn en el puerto
 
 **El puerto 8001 no se publica hacia el computador**, por la misma razón que en existencias: confía en las cabeceras del Gateway. Para usarlo, entrar por `http://localhost:8000/api/catalogo/...`. Solo para depurar, agregar temporalmente `ports: ["8001:8001"]` al servicio en el compose.
 
-Para activar la validación en existencias, poner `CATALOGO_VALIDACION=true` en `ms-existencias` una vez que haya productos y proveedores cargados.
+`ms-existencias` valida contra este servicio (`CATALOGO_VALIDACION=true` en el compose). La base arranca vacía, así que mientras no haya productos y proveedores cargados, existencias rechaza con 422 cualquier producto o proveedor. Para trabajar sin catálogo, poner esa variable en `false`.
 
 ### Variables de entorno
 

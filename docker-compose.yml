@@ -144,7 +144,7 @@ services:
       - DJANGO_SECRET_KEY=existencias_dev_2026
       - DJANGO_DEBUG=false
       - CATALOGO_SERVICE_URL=http://ms-catalogo:8001/api/catalogo
-      - CATALOGO_VALIDACION=false # cambiar a true cuando ms-catalogo esté implementado
+      - CATALOGO_VALIDACION=true # valida productos y proveedores contra ms-catalogo; sin datos cargados allí rechaza con 422
       - NOTIFICACIONES_SERVICE_URL=http://ms-notificaciones:5001/api/notifications
     depends_on:
       existencias-db:
