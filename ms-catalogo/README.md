@@ -44,12 +44,12 @@ Los errores tienen siempre la forma `{"error": CODIGO, "mensaje": ...}`: `DATOS_
 
 ## Reglas de negocio
 
-- **Baja lógica** en productos, categorías y proveedores. El `PUT` no reactiva registros.
+- **Baja lógica** en productos, categorías y proveedores. El `PUT` acepta `activo` para reactivar o dar de baja; si se omite, conserva el estado. En el `POST` se ignora: todo se crea activo. Reactivar un producto exige que su categoría esté activa, y reactivar una subcategoría exige que su padre lo esté.
 - **Categorías:** el nombre es único dentro del mismo nivel; una categoría no puede ser su propio padre ni de una de sus descendientes (400); solo se da de baja si no tiene productos ni subcategorías activas (409). Filtrar productos por `categoria_id` incluye las subcategorías.
-- **Códigos y NIT únicos** sin distinguir mayúsculas (409).
-- **Proveedor principal:** un producto solo tiene un proveedor principal; al asociar uno nuevo con `es_principal: true`, el anterior deja de serlo.
+- **Códigos y NIT únicos** sin distinguir mayúsculas (409). La unicidad, incluido el nombre de categoría por nivel, está también en la base de datos con índices sobre `LOWER(...)`, así que dos peticiones simultáneas no pueden duplicar un valor.
+- **Proveedor principal:** un producto solo tiene un proveedor principal (índice único parcial). Al asociar uno con `es_principal: true`, o al marcarlo con `PUT /productos/{id}/proveedores/{proveedor_id}`, el anterior deja de serlo. Ese `PUT` también cambia el precio de compra.
 - **Unidades de medida:** se eliminan de verdad, pero solo si ningún producto las usa (409 `UNIDAD_EN_USO`).
-- **Nota sobre el modelo:** `producto_proveedor` tiene un `id` propio además de la restricción única (producto, proveedor), porque Django 5.0/5.1 no admite llaves primarias compuestas.
+- **Llave compuesta:** `producto_proveedor` usa la llave primaria (`producto_id`, `proveedor_id`) del diagrama, con `CompositePrimaryKey`. Por eso este servicio usa **Django 5.2**, a diferencia de existencias (5.0/5.1).
 - La base de datos arranca vacía: antes de crear productos hay que crear al menos una unidad de medida y una categoría.
 
 ## Cómo se ejecuta
@@ -87,4 +87,4 @@ Pruebas automáticas de comportamiento, en [`catalogo/tests/`](catalogo/tests/).
 docker compose exec ms-catalogo python manage.py test catalogo
 ```
 
-Son 95 pruebas: productos (alta, edición, baja, filtros, paginación y detalle que consume existencias), categorías (jerarquía, ciclos, baja), proveedores, asociación producto-proveedor, unidades de medida, permisos por rol y formato de errores.
+Son 122 pruebas: productos (alta, edición, baja, reactivación, filtros, paginación y detalle que consume existencias), categorías (jerarquía, ciclos, baja, reactivación), proveedores, asociación producto-proveedor (alta, cambio de precio y de principal, borrado), unidades de medida, restricciones de unicidad en la base de datos, permisos por rol y formato de errores.

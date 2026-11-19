@@ -11,6 +11,8 @@ info:
     * **Acceso:** únicamente a través del API Gateway (Laravel), que valida el JWT.
     * **Baja lógica:** los DELETE marcan el registro como inactivo; no se borra porque
       el microservicio de existencias guarda referencias a productos y proveedores.
+    * **Reactivación:** los PUT de productos, categorías y proveedores aceptan `activo`
+      para reactivar (o dar de baja) un registro. Si se omite, se conserva el estado actual.
 
     Requerimientos cubiertos: RF01, RF02, RF03, RF12.
 
@@ -111,8 +113,8 @@ paths:
         '404': { $ref: '#/components/responses/NoEncontrado' }
     put:
       tags: ["Productos"]
-      summary: "Actualiza un producto"
-      description: "Solo rol ADMIN."
+      summary: "Actualiza, reactiva o da de baja un producto"
+      description: "Con `activo: true` reactiva el producto (su categoría debe estar activa). Si se omite `activo`, se conserva el estado. Solo rol ADMIN."
       requestBody:
         required: true
         content:
@@ -166,6 +168,24 @@ paths:
         in: path
         required: true
         schema: { type: integer, example: 5 }
+    put:
+      tags: ["Proveedores"]
+      summary: "Actualiza el precio de compra o el proveedor principal"
+      description: "Con `es_principal: true` este proveedor pasa a ser el principal y el anterior deja de serlo. Si se omite `es_principal`, se conserva. Solo rol ADMIN."
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/ProductoProveedorUpdate' }
+      responses:
+        '200':
+          description: "Asociación actualizada"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ProductoProveedor' }
+        '400': { $ref: '#/components/responses/DatosInvalidos' }
+        '403': { $ref: '#/components/responses/SinPermiso' }
+        '404': { $ref: '#/components/responses/NoEncontrado' }
     delete:
       tags: ["Proveedores"]
       summary: "Elimina la asociación producto-proveedor"
@@ -217,7 +237,8 @@ paths:
       - $ref: '#/components/parameters/Id'
     put:
       tags: ["Categorías"]
-      summary: "Actualiza una categoría"
+      summary: "Actualiza, reactiva o da de baja una categoría"
+      description: "Con `activo: true` la reactiva (su padre debe estar activo); con `activo: false` aplica la misma regla que el DELETE. Si se omite `activo`, se conserva el estado. Solo rol ADMIN."
       requestBody:
         required: true
         content:
@@ -235,6 +256,11 @@ paths:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
         '404': { $ref: '#/components/responses/NoEncontrado' }
+        '409':
+          description: "Nombre repetido en el mismo nivel, o se intenta dar de baja con productos o subcategorías activas"
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
     delete:
       tags: ["Categorías"]
       summary: "Da de baja una categoría (baja lógica)"
@@ -304,7 +330,8 @@ paths:
         '404': { $ref: '#/components/responses/NoEncontrado' }
     put:
       tags: ["Proveedores"]
-      summary: "Actualiza un proveedor"
+      summary: "Actualiza, reactiva o da de baja un proveedor"
+      description: "Con `activo` reactiva o da de baja al proveedor. Si se omite, se conserva el estado. Solo rol ADMIN."
       requestBody:
         required: true
         content:
@@ -481,6 +508,7 @@ components:
         nombre: { type: string, maxLength: 100, example: "Lácteos" }
         descripcion: { type: string, maxLength: 255, example: "Leche y derivados" }
         categoria_padre_id: { type: integer, nullable: true, example: 1 }
+        activo: { type: boolean, description: "Solo en PUT. Omitido conserva el estado; en POST se ignora", example: true }
 
     Proveedor:
       type: object
@@ -501,6 +529,7 @@ components:
         telefono: { type: string, maxLength: 20, example: "+57 3001234567" }
         email: { type: string, format: email, example: "ventas@lacteoseje.com" }
         ciudad: { type: string, maxLength: 80, example: "Pereira" }
+        activo: { type: boolean, description: "Solo en PUT. Omitido conserva el estado; en POST se ignora", example: true }
 
     Producto:
       type: object
@@ -537,6 +566,7 @@ components:
         precio_venta: { type: number, format: double, minimum: 0, example: 4500.00 }
         costo: { type: number, format: double, minimum: 0, example: 3200.00 }
         es_perecedero: { type: boolean, default: false, example: true }
+        activo: { type: boolean, description: "Solo en PUT. Omitido conserva el estado; en POST se ignora", example: true }
 
     ProductoProveedor:
       type: object
@@ -552,3 +582,9 @@ components:
         proveedor_id: { type: integer, example: 5 }
         precio_compra: { type: number, format: double, minimum: 0, example: 3100.00 }
         es_principal: { type: boolean, default: false }
+    ProductoProveedorUpdate:
+      type: object
+      required: [precio_compra]
+      properties:
+        precio_compra: { type: number, format: double, minimum: 0, example: 3000.00 }
+        es_principal: { type: boolean, description: "Omitido conserva el valor actual", example: true }
