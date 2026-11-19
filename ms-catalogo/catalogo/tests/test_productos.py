@@ -79,11 +79,42 @@ class ProductosEscrituraTest(BaseAPITest):
     def test_actualizar_inexistente_404(self):
         self.assertEqual(self.admin.put(f"{URL}/9999", self.datos_producto(), format="json").status_code, 404)
 
-    def test_actualizar_no_reactiva(self):
+    def test_put_sin_activo_conserva_el_estado(self):
+        p = self.crear_producto(activo=False)
+        r = self.admin.put(f"{URL}/{p.id}", self.datos_producto(categoria=p.categoria, unidad=p.unidad_medida),
+                           format="json")
+        self.assertFalse(r.json()["activo"])
+
+    def test_put_reactiva_producto(self):
         p = self.crear_producto(activo=False)
         r = self.admin.put(f"{URL}/{p.id}", {**self.datos_producto(categoria=p.categoria, unidad=p.unidad_medida),
                                               "activo": True}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["activo"])
+
+    def test_put_da_de_baja_producto(self):
+        p = self.crear_producto()
+        r = self.admin.put(f"{URL}/{p.id}", {**self.datos_producto(categoria=p.categoria, unidad=p.unidad_medida),
+                                              "activo": False}, format="json")
         self.assertFalse(r.json()["activo"])
+
+    def test_no_reactiva_producto_de_categoria_inactiva_400(self):
+        cat = self.crear_categoria("Vieja", activo=False)
+        p = self.crear_producto(categoria=cat, activo=False)
+        r = self.admin.put(f"{URL}/{p.id}", {**self.datos_producto(categoria=cat, unidad=p.unidad_medida),
+                                              "activo": True}, format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_editar_producto_inactivo_de_categoria_inactiva_es_valido(self):
+        cat = self.crear_categoria("Vieja", activo=False)
+        p = self.crear_producto(categoria=cat, activo=False)
+        r = self.admin.put(f"{URL}/{p.id}", self.datos_producto(categoria=cat, unidad=p.unidad_medida,
+                                                                nombre="Corregido"), format="json")
+        self.assertEqual(r.status_code, 200)
+
+    def test_post_ignora_activo(self):
+        r = self.admin.post(URL, {**self.datos_producto(), "activo": False}, format="json")
+        self.assertTrue(r.json()["activo"])
 
     def test_baja_logica(self):
         p = self.crear_producto()
@@ -284,3 +315,60 @@ class SaludTest(BaseAPITest):
         r = self.interno.get(f"{PREFIJO}/health")
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json(), {"status": "ok", "servicio": "ms-catalogo"})
+
+
+class ActualizarAsociacionTest(BaseAPITest):
+    """PUT /productos/{id}/proveedores/{proveedor_id}: precio y proveedor principal."""
+
+    def setUp(self):
+        super().setUp()
+        self.producto = self.crear_producto()
+        self.prov1 = self.crear_proveedor("1", "Proveedor Uno")
+        self.prov2 = self.crear_proveedor("2", "Proveedor Dos")
+        ProductoProveedor.objects.create(producto=self.producto, proveedor=self.prov1, precio_compra=3100,
+                                         es_principal=True)
+        ProductoProveedor.objects.create(producto=self.producto, proveedor=self.prov2, precio_compra=3300)
+        self.base = f"{URL}/{self.producto.id}/proveedores"
+
+    def principales(self):
+        return list(ProductoProveedor.objects.filter(producto=self.producto, es_principal=True)
+                    .values_list("proveedor_id", flat=True))
+
+    def test_cambia_precio_y_conserva_principal(self):
+        r = self.admin.put(f"{self.base}/{self.prov1.id}", {"precio_compra": 3000}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json(), {"proveedor_id": self.prov1.id, "razon_social": "Proveedor Uno",
+                                    "precio_compra": 3000, "es_principal": True})
+
+    def test_cambia_el_proveedor_principal(self):
+        r = self.admin.put(f"{self.base}/{self.prov2.id}", {"precio_compra": 3300, "es_principal": True},
+                           format="json")
+        self.assertTrue(r.json()["es_principal"])
+        self.assertEqual(self.principales(), [self.prov2.id])
+
+    def test_quitar_principal_deja_al_producto_sin_principal(self):
+        self.admin.put(f"{self.base}/{self.prov1.id}", {"precio_compra": 3100, "es_principal": False},
+                       format="json")
+        self.assertEqual(self.principales(), [])
+
+    def test_marcar_principal_al_que_ya_lo_es(self):
+        r = self.admin.put(f"{self.base}/{self.prov1.id}", {"precio_compra": 1, "es_principal": True},
+                           format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.principales(), [self.prov1.id])
+
+    def test_asociacion_inexistente_404(self):
+        otro = self.crear_proveedor("3", "Sin asociar")
+        self.assertEqual(self.admin.put(f"{self.base}/{otro.id}", {"precio_compra": 1}, format="json").status_code,
+                         404)
+        self.assertEqual(self.admin.put(f"{URL}/9999/proveedores/{self.prov1.id}", {"precio_compra": 1},
+                                        format="json").status_code, 404)
+
+    def test_datos_invalidos_400(self):
+        self.assertEqual(self.admin.put(f"{self.base}/{self.prov1.id}", {}, format="json").status_code, 400)
+        self.assertEqual(self.admin.put(f"{self.base}/{self.prov1.id}", {"precio_compra": -1},
+                                        format="json").status_code, 400)
+
+    def test_solo_admin(self):
+        r = self.operador.put(f"{self.base}/{self.prov1.id}", {"precio_compra": 1}, format="json")
+        self.assertEqual(r.status_code, 403)

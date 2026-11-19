@@ -7,17 +7,18 @@ from ..errores import ErrorNegocio
 from ..identidad import ADMIN, exigir_rol
 from ..models import Categoria, Producto, ProductoProveedor, Proveedor, UnidadMedida
 from ..serializers import (ProductoDetalleSerializer, ProductoInputSerializer, ProductoProveedorInputSerializer,
-                           ProductoProveedorSerializer, ProductoSerializer)
+                           ProductoProveedorSerializer, ProductoProveedorUpdateSerializer, ProductoSerializer)
 from ..utils import guardar_o_409, obtener_o_404, paginar, param_bool, param_int, verificar_unico
 from .categorias import ids_con_descendientes
 
 
-def _validar_referencias(datos):
-    """Categoría y unidad de medida deben existir; la categoría, además, estar activa."""
+def _validar_referencias(datos, exigir_categoria_activa=True):
+    """Categoría y unidad de medida deben existir; la categoría, además, estar activa
+    (salvo que el producto vaya a quedar inactivo)."""
     categoria = Categoria.objects.filter(pk=datos["categoria_id"]).first()
     if categoria is None:
         raise ErrorNegocio(400, "DATOS_INVALIDOS", f"La categoría {datos['categoria_id']} no existe")
-    if not categoria.activo:
+    if exigir_categoria_activa and not categoria.activo:
         raise ErrorNegocio(400, "DATOS_INVALIDOS", f"La categoría {datos['categoria_id']} está inactiva")
     unidad = UnidadMedida.objects.filter(pk=datos["unidad_medida_id"]).first()
     if unidad is None:
@@ -78,14 +79,17 @@ class ProductoDetalleView(APIView):
         return Response(ProductoDetalleSerializer(producto).data)
 
     def put(self, request, pk):
+        """Actualiza datos; con `activo` permite reactivar o dar de baja. Omitido conserva el estado."""
         exigir_rol(request, ADMIN)
         producto = obtener_o_404(Producto, pk, "El producto")
         s = ProductoInputSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         datos = s.validated_data
-        categoria, unidad = _validar_referencias(datos)
+        activo = datos.get("activo", producto.activo)
+        categoria, unidad = _validar_referencias(datos, exigir_categoria_activa=activo)
         verificar_unico(Producto, "codigo", datos["codigo"], "un producto", excluir_id=producto.pk)
         _aplicar(producto, datos, categoria, unidad)
+        producto.activo = activo
         with guardar_o_409("Ya existe un producto con ese código"):
             producto.save()
         return Response(ProductoSerializer(producto).data)
@@ -113,21 +117,48 @@ class ProductoProveedoresView(APIView):
                                f"El proveedor {proveedor.pk} ya está asociado al producto {producto.pk}")
         with guardar_o_409("El proveedor ya está asociado al producto"):
             with transaction.atomic():
-                if datos["es_principal"]:  # solo puede haber un proveedor principal por producto
-                    ProductoProveedor.objects.filter(producto=producto, es_principal=True).update(es_principal=False)
+                if datos["es_principal"]:
+                    _desmarcar_principal(producto.pk)
                 asociacion = ProductoProveedor.objects.create(
                     producto=producto, proveedor=proveedor,
                     precio_compra=datos["precio_compra"], es_principal=datos["es_principal"])
         return Response(ProductoProveedorSerializer(asociacion).data, status=201)
 
 
+def _desmarcar_principal(producto_id):
+    """Solo puede haber un proveedor principal por producto: se desmarca el actual."""
+    ProductoProveedor.objects.filter(producto_id=producto_id, es_principal=True).update(es_principal=False)
+
+
 class ProductoProveedorDetalleView(APIView):
-    def delete(self, request, pk, proveedor_id):
-        exigir_rol(request, ADMIN)
+    @staticmethod
+    def _asociacion(pk, proveedor_id):
         obtener_o_404(Producto, pk, "El producto")
-        asociacion = ProductoProveedor.objects.filter(producto_id=pk, proveedor_id=proveedor_id).first()
+        asociacion = ProductoProveedor.objects.select_related("proveedor") \
+            .filter(producto_id=pk, proveedor_id=proveedor_id).first()
         if asociacion is None:
             raise ErrorNegocio(404, "NO_ENCONTRADO",
                                f"El proveedor {proveedor_id} no está asociado al producto {pk}")
-        asociacion.delete()
+        return asociacion
+
+    def put(self, request, pk, proveedor_id):
+        """Cambia el precio de compra y/o el proveedor principal sin recrear la asociación."""
+        exigir_rol(request, ADMIN)
+        asociacion = self._asociacion(pk, proveedor_id)
+        s = ProductoProveedorUpdateSerializer(data=request.data)
+        s.is_valid(raise_exception=True)
+        datos = s.validated_data
+        with guardar_o_409("No se pudo actualizar la asociación por un cambio simultáneo"):
+            with transaction.atomic():
+                if datos.get("es_principal") and not asociacion.es_principal:
+                    _desmarcar_principal(pk)
+                asociacion.precio_compra = datos["precio_compra"]
+                if "es_principal" in datos:
+                    asociacion.es_principal = datos["es_principal"]
+                asociacion.save(update_fields=["precio_compra", "es_principal"])
+        return Response(ProductoProveedorSerializer(asociacion).data)
+
+    def delete(self, request, pk, proveedor_id):
+        exigir_rol(request, ADMIN)
+        self._asociacion(pk, proveedor_id).delete()
         return Response(status=204)

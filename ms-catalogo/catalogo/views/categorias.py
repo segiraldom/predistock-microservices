@@ -20,8 +20,9 @@ def ids_con_descendientes(categoria_id):
     return ids
 
 
-def _validar_padre(padre_id, categoria=None):
-    """Devuelve el padre (o None). 400 si no existe, está inactivo o produciría un ciclo."""
+def _validar_padre(padre_id, categoria=None, exigir_activo=True):
+    """Devuelve el padre (o None). 400 si no existe, produciría un ciclo o está inactivo
+    (esto último solo si la categoría va a quedar activa)."""
     if padre_id is None:
         return None
     if categoria is not None and padre_id in ids_con_descendientes(categoria.pk):
@@ -30,7 +31,7 @@ def _validar_padre(padre_id, categoria=None):
     padre = Categoria.objects.filter(pk=padre_id).first()
     if padre is None:
         raise ErrorNegocio(400, "DATOS_INVALIDOS", f"La categoría padre {padre_id} no existe")
-    if not padre.activo:
+    if exigir_activo and not padre.activo:
         raise ErrorNegocio(400, "DATOS_INVALIDOS", f"La categoría padre {padre_id} está inactiva")
     return padre
 
@@ -38,6 +39,16 @@ def _validar_padre(padre_id, categoria=None):
 def _verificar_nombre(nombre, padre_id, excluir_id=None):
     verificar_unico(Categoria, "nombre", nombre, "una categoría en ese nivel", excluir_id=excluir_id,
                     categoria_padre_id=padre_id)
+
+
+def _verificar_baja(categoria):
+    """409 si la categoría tiene productos o subcategorías activas."""
+    productos = categoria.productos.filter(activo=True).count()
+    subcategorias = categoria.subcategorias.filter(activo=True).count()
+    if productos or subcategorias:
+        raise ErrorNegocio(409, "CATEGORIA_EN_USO",
+                           f"La categoría {categoria.nombre} tiene {productos} productos y "
+                           f"{subcategorias} subcategorías activas y no puede darse de baja")
 
 
 class CategoriaListaView(APIView):
@@ -55,37 +66,37 @@ class CategoriaListaView(APIView):
         datos = s.validated_data
         padre = _validar_padre(datos.get("categoria_padre_id"))
         _verificar_nombre(datos["nombre"], padre.pk if padre else None)
-        with guardar_o_409("Ya existe una categoría con ese nombre"):
+        with guardar_o_409("Ya existe una categoría con ese nombre en ese nivel"):
             categoria = Categoria.objects.create(nombre=datos["nombre"], descripcion=datos.get("descripcion"),
-                                                 categoria_padre=padre)
+                                                 categoria_padre=padre)  # siempre se crea activa
         return Response(CategoriaSerializer(categoria).data, status=201)
 
 
 class CategoriaDetalleView(APIView):
     def put(self, request, pk):
+        """Actualiza datos; con `activo` permite reactivar o dar de baja. Omitido conserva el estado."""
         exigir_rol(request, ADMIN)
         categoria = obtener_o_404(Categoria, pk, "La categoría")
         s = CategoriaInputSerializer(data=request.data)
         s.is_valid(raise_exception=True)
         datos = s.validated_data
-        padre = _validar_padre(datos.get("categoria_padre_id"), categoria)
+        activo = datos.get("activo", categoria.activo)
+        if categoria.activo and not activo:
+            _verificar_baja(categoria)  # misma regla que el DELETE
+        padre = _validar_padre(datos.get("categoria_padre_id"), categoria, exigir_activo=activo)
         _verificar_nombre(datos["nombre"], padre.pk if padre else None, excluir_id=categoria.pk)
         categoria.nombre = datos["nombre"]
         categoria.descripcion = datos.get("descripcion")
         categoria.categoria_padre = padre
-        with guardar_o_409("Ya existe una categoría con ese nombre"):
+        categoria.activo = activo
+        with guardar_o_409("Ya existe una categoría con ese nombre en ese nivel"):
             categoria.save()
         return Response(CategoriaSerializer(categoria).data)
 
     def delete(self, request, pk):
         exigir_rol(request, ADMIN)
         categoria = obtener_o_404(Categoria, pk, "La categoría")
-        productos = categoria.productos.filter(activo=True).count()
-        subcategorias = categoria.subcategorias.filter(activo=True).count()
-        if productos or subcategorias:
-            raise ErrorNegocio(409, "CATEGORIA_EN_USO",
-                               f"La categoría {categoria.nombre} tiene {productos} productos y "
-                               f"{subcategorias} subcategorías activas y no puede darse de baja")
+        _verificar_baja(categoria)
         categoria.activo = False
         categoria.save(update_fields=["activo"])
         return Response(status=204)

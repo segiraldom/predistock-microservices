@@ -81,10 +81,16 @@ class ProveedoresTest(BaseAPITest):
         p = self.crear_proveedor(nit="900123456-7")
         self.assertEqual(self.admin.put(f"{URL}/{p.id}", NUEVO, format="json").status_code, 200)
 
-    def test_actualizar_no_reactiva(self):
+    def test_put_sin_activo_conserva_el_estado(self):
+        p = self.crear_proveedor(activo=False)
+        self.assertFalse(self.admin.put(f"{URL}/{p.id}", NUEVO, format="json").json()["activo"])
+
+    def test_put_reactiva_proveedor(self):
         p = self.crear_proveedor(activo=False)
         r = self.admin.put(f"{URL}/{p.id}", {**NUEVO, "activo": True}, format="json")
-        self.assertFalse(r.json()["activo"])
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["activo"])
+        self.assertTrue(self.interno.get(f"{URL}/{p.id}").json()["activo"])
 
     def test_baja_logica(self):
         p = self.crear_proveedor()

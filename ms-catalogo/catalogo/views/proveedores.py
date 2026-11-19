@@ -26,7 +26,7 @@ class ProveedorListaView(APIView):
         s.is_valid(raise_exception=True)
         verificar_unico(Proveedor, "nit", s.validated_data["nit"], "un proveedor")
         with guardar_o_409("Ya existe un proveedor con ese NIT"):
-            proveedor = s.save()
+            proveedor = s.save(activo=True)
         return Response(ProveedorSerializer(proveedor).data, status=201)
 
 
@@ -36,6 +36,7 @@ class ProveedorDetalleView(APIView):
         return Response(ProveedorSerializer(obtener_o_404(Proveedor, pk, "El proveedor")).data)
 
     def put(self, request, pk):
+        """Actualiza datos; con `activo` permite reactivar o dar de baja. Omitido conserva el estado."""
         exigir_rol(request, ADMIN)
         proveedor = obtener_o_404(Proveedor, pk, "El proveedor")
         s = ProveedorSerializer(proveedor, data=request.data)

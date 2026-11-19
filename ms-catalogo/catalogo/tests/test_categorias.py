@@ -127,3 +127,41 @@ class CategoriasTest(BaseAPITest):
     def test_baja_solo_admin(self):
         c = self.crear_categoria("Lácteos")
         self.assertEqual(self.operador.delete(f"{URL}/{c.id}").status_code, 403)
+
+
+class ReactivacionCategoriaTest(BaseAPITest):
+    def test_put_sin_activo_conserva_el_estado(self):
+        c = self.crear_categoria("Vieja", activo=False)
+        self.assertFalse(self.admin.put(f"{URL}/{c.id}", {"nombre": "Vieja"}, format="json").json()["activo"])
+
+    def test_put_reactiva(self):
+        c = self.crear_categoria("Vieja", activo=False)
+        r = self.admin.put(f"{URL}/{c.id}", {"nombre": "Vieja", "activo": True}, format="json")
+        self.assertEqual(r.status_code, 200)
+        self.assertTrue(r.json()["activo"])
+
+    def test_no_reactiva_subcategoria_con_padre_inactivo_400(self):
+        padre = self.crear_categoria("Padre", activo=False)
+        hija = self.crear_categoria("Hija", padre=padre, activo=False)
+        r = self.admin.put(f"{URL}/{hija.id}", {"nombre": "Hija", "categoria_padre_id": padre.id, "activo": True},
+                           format="json")
+        self.assertEqual(r.status_code, 400)
+
+    def test_editar_subcategoria_inactiva_con_padre_inactivo_es_valido(self):
+        padre = self.crear_categoria("Padre", activo=False)
+        hija = self.crear_categoria("Hija", padre=padre, activo=False)
+        r = self.admin.put(f"{URL}/{hija.id}", {"nombre": "Hija 2", "categoria_padre_id": padre.id},
+                           format="json")
+        self.assertEqual(r.status_code, 200)
+
+    def test_baja_por_put_aplica_la_misma_regla_que_delete(self):
+        c = self.crear_categoria("Lácteos")
+        self.crear_producto(categoria=c)
+        r = self.admin.put(f"{URL}/{c.id}", {"nombre": "Lácteos", "activo": False}, format="json")
+        self.assertEqual(r.status_code, 409)
+        self.assertEqual(r.json()["error"], "CATEGORIA_EN_USO")
+
+    def test_baja_por_put_sin_dependencias(self):
+        c = self.crear_categoria("Lácteos")
+        r = self.admin.put(f"{URL}/{c.id}", {"nombre": "Lácteos", "activo": False}, format="json")
+        self.assertFalse(r.json()["activo"])
