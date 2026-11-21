@@ -39,6 +39,8 @@ const initDb = async () => {
   `;
 
   try {
+    await pool.query(queryDDL);
+
     await pool.query(`
         INSERT INTO roles (id, nombre, descripcion) VALUES
         (1, 'ADMIN', 'Control total de la plataforma y administracion general'),
