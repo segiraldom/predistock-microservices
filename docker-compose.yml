@@ -33,6 +33,9 @@ services:
       - DATABASE_URL=postgresql://predi_user:predi_password@autentificacion-db:5432/autentificacion_db
     volumes:
       - ./ms-usuarios:/app
+      # Volumen anónimo: conserva el node_modules de la imagen; sin esto el montaje de arriba
+      # lo oculta y el servicio no arranca en equipos donde no se corrió npm install.
+      - /app/node_modules
     depends_on:
       autentificacion-db:
         condition: service_healthy
@@ -96,7 +99,7 @@ services:
     container_name: predistock-ms-catalogo
     restart: unless-stopped
     # Sin "ports": solo es accesible por la red interna. El servicio confía en las cabeceras
-    # X-Usuario-Id / X-Rol que pone el Gateway, así que no debe exponerse.
+    # X-Usuario-Id / X-Rol que pone el Gateway, así- que no debe exponerse.
     # Para probarlo directo en desarrollo, agregar temporalmente: ports: ["8001:8001"]
     expose:
       - "8001"
@@ -194,6 +197,40 @@ services:
       timeout: 5s
       retries: 5
       start_period: 10s
+
+  # SEEDERS (datos de demostración). Servicios de un solo uso: arrancan, siembran y terminan.
+  # Son idempotentes, así que pueden correr en cada "docker compose up" sin duplicar datos.
+  # Mismo comando en Windows, Linux y Kubernetes (allí serían Jobs con la misma imagen).
+  seed-catalogo:
+    build: ./ms-catalogo
+    container_name: predistock-seed-catalogo
+    command: python manage.py seed_catalogo --confirmo
+    restart: "no"
+    environment:
+      - DATABASE_URL=postgresql://predi_user:predi_password@catalogo-db:5432/catalogo_db
+      - DJANGO_SECRET_KEY=catalogo_dev_2026
+      - DJANGO_DEBUG=false
+    depends_on:
+      ms-catalogo:
+        condition: service_healthy
+
+  seed-existencias:
+    build: ./ms-existencias
+    container_name: predistock-seed-existencias
+    command: python manage.py seed_existencias --confirmo --solo-si-vacio
+    restart: "no"
+    environment:
+      - DATABASE_URL=postgresql://predi_user:predi_password@existencias-db:5432/existencias_db
+      - DJANGO_SECRET_KEY=existencias_dev_2026
+      - DJANGO_DEBUG=false
+      - CATALOGO_SERVICE_URL=http://ms-catalogo:8001/api/catalogo
+      - CATALOGO_VALIDACION=true
+      - NOTIFICACIONES_SERVICE_URL=http://ms-notificaciones:5001/api/notifications
+    depends_on:
+      seed-catalogo:
+        condition: service_completed_successfully
+      ms-existencias:
+        condition: service_healthy
 
   #FRONTEND: 5173
   frontend:
