@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo } from 'react';
-import { Play, TrendingUp, Layers, PackageCheck, AlertCircle, CheckCircle2, XCircle, Clock } from 'lucide-react';
+import { Play, TrendingUp, Layers, PackageCheck, AlertCircle, CheckCircle2, XCircle, Clock, Database } from 'lucide-react';
 import gatewayClient from '../api/gatewayClient';
 
 const FALLBACK_PRODUCTS = {
@@ -21,7 +21,6 @@ export default function AnalyticsPage() {
   const [predictions, setPredictions] = useState([]);
   const [suggestions, setSuggestions] = useState([]);
   const [catalogProducts, setCatalogProducts] = useState([]);
-  const [isCatalogLive, setIsCatalogLive] = useState(false);
 
   const [trainResult, setTrainResult] = useState(() => {
     const saved = sessionStorage.getItem('predistock_train_result');
@@ -43,26 +42,28 @@ export default function AnalyticsPage() {
 
   const getProductName = (productId) => productNamesMap[productId] || `Producto #${productId}`;
 
+  useEffect(() => {
+    gatewayClient.get('/catalogo/productos')
+      .then((res) => {
+        const items = Array.isArray(res.data) ? res.data : (res.data?.results || []);
+        setCatalogProducts(items);
+      })
+      .catch(() => setCatalogProducts([]));
+  }, []);
+
   const fetchAnalyticsData = async () => {
     setLoadingData(true);
     setError('');
     try {
-      const [segRes, predRes, sugRes, catRes] = await Promise.all([
+      const [segRes, predRes, sugRes] = await Promise.all([
         gatewayClient.get(`/analytics/segmentation?warehouse_id=${warehouseId}`),
         gatewayClient.get(`/analytics/predictions?warehouse_id=${warehouseId}`),
         gatewayClient.get(`/analytics/suggestions?warehouse_id=${warehouseId}`),
-        gatewayClient.get('/catalogo/productos')
-          .then((res) => ({ live: true, data: res.data }))
-          .catch(() => ({ live: false, data: [] })),
       ]);
 
       setSegmentation(Array.isArray(segRes.data) ? segRes.data : []);
       setPredictions(Array.isArray(predRes.data) ? predRes.data : []);
       setSuggestions(Array.isArray(sugRes.data) ? sugRes.data : []);
-
-      setIsCatalogLive(catRes.live);
-      const items = Array.isArray(catRes.data) ? catRes.data : (catRes.data?.results || []);
-      setCatalogProducts(items);
     } catch (err) {
       setError(err.friendlyMessage || 'Error al consultar el pipeline de analítica.');
     } finally {
@@ -86,6 +87,8 @@ export default function AnalyticsPage() {
         r2,
         silhouette,
         approved: r2 >= 0.70,
+        version: data.version || 'N/A',
+        recordsProcessed: data.records_processed ?? 0,
         trainedAt: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
       };
 
@@ -101,12 +104,14 @@ export default function AnalyticsPage() {
           r2,
           silhouette,
           approved: false,
+          version: err.response?.data?.version || 'Rechazado',
+          recordsProcessed: err.response?.data?.records_processed ?? 0,
           trainedAt: new Date().toLocaleTimeString('es-CO', { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
         };
         setTrainResult(resultPayload);
         sessionStorage.setItem('predistock_train_result', JSON.stringify(resultPayload));
       } else {
-        setError(err.response?.data?.error || err.friendlyMessage || 'Error ejecutando el entrenamiento de modelos.');
+        setError(err.response?.data?.detail || err.response?.data?.error || err.friendlyMessage || 'Error ejecutando el entrenamiento de modelos.');
       }
     } finally {
       setTraining(false);
@@ -117,14 +122,7 @@ export default function AnalyticsPage() {
     <div className="space-y-6">
       <div className="flex flex-wrap items-center justify-between gap-4 bg-white p-5 rounded-lg shadow-sm border border-slate-200">
         <div>
-          <div className="flex items-center gap-2.5">
-            <h1 className="text-2xl font-bold text-slate-800">Analítica Predictiva y Minería (ML)</h1>
-            <span className={`text-[11px] font-medium px-2 py-0.5 rounded-full ${
-              isCatalogLive ? 'bg-emerald-100 text-emerald-800' : 'bg-slate-100 text-slate-600'
-            }`}>
-              {isCatalogLive ? 'Catálogo en vivo' : 'Nombres de respaldo'}
-            </span>
-          </div>
+          <h1 className="text-2xl font-bold text-slate-800">Analítica Predictiva y Minería (ML)</h1>
           <p className="text-sm text-slate-500">Segmentación K-Means, Pronóstico Random Forest y Optimización de Stock</p>
         </div>
 
@@ -185,9 +183,15 @@ export default function AnalyticsPage() {
             </div>
           </div>
 
-          <div className="flex items-center gap-1.5 text-xs opacity-75 font-medium">
-            <Clock className="w-3.5 h-3.5" />
-            <span>Última ejecución: {trainResult.trainedAt}</span>
+          <div className="flex flex-col sm:items-end gap-1 text-xs opacity-80 font-medium">
+            <div className="flex items-center gap-1.5">
+              <Database className="w-3.5 h-3.5" />
+              <span>{trainResult.recordsProcessed} registros procesados · Modelo {trainResult.version}</span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <Clock className="w-3.5 h-3.5" />
+              <span>Última ejecución: {trainResult.trainedAt}</span>
+            </div>
           </div>
         </div>
       )}

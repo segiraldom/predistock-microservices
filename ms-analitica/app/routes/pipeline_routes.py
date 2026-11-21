@@ -77,7 +77,13 @@ def trigger_pipeline():
             ))
 
         # 5. Sugerencias de distribución y stock óptimo (RFM_07)
-        stock_map = {(row['producto_id'], row['bodega_id']): 25 for _, row in forecast_res.iterrows()}
+        live_stock_map = collector.get_current_stock_map()
+        stock_map = {
+            (int(row['producto_id']), int(row['bodega_id'])): live_stock_map.get(
+                (int(row['producto_id']), int(row['bodega_id'])), 25
+            )
+            for _, row in forecast_res.iterrows()
+        }
         suggestions_df = calculate_stock_suggestions(forecast_res, stock_map)
 
         for _, row in suggestions_df.iterrows():

@@ -12,29 +12,24 @@ services:
       - CATALOGO_SERVICE_URL=http://ms-catalogo:8001
       - EXISTENCIAS_SERVICE_URL=http://ms-existencias:8002
       - NOTIFICACIONES_SERVICE_URL=http://ms-notificaciones:5001
-      - JWT_SECRET=password_2026
+      - JWT_SECRET=${JWT_SECRET}
     depends_on:
       - ms-usuarios
       - ms-analitica
-      - ms-catalogo
-      - ms-existencias
-      - ms-notificaciones
 
   #MS-USUARIOS: 3000
   ms-usuarios:
     build: ./ms-usuarios
     container_name: predistock-ms-usuarios
     restart: unless-stopped
-    ports:
-      - "3000:3000"
+    expose:
+      - "3000"
     environment:
       - PORT=3000
-      - JWT_SECRET=password_2026
-      - DATABASE_URL=postgresql://predi_user:predi_password@autentificacion-db:5432/autentificacion_db
+      - JWT_SECRET=${JWT_SECRET}
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@autentificacion-db:5432/${AUTH_DB_NAME}
     volumes:
       - ./ms-usuarios:/app
-      # Volumen anónimo: conserva el node_modules de la imagen; sin esto el montaje de arriba
-      # lo oculta y el servicio no arranca en equipos donde no se corrió npm install.
       - /app/node_modules
     depends_on:
       autentificacion-db:
@@ -44,15 +39,13 @@ services:
     image: postgres:15-alpine
     container_name: predistock-autentificacion-db
     environment:
-      POSTGRES_DB: autentificacion_db
-      POSTGRES_USER: predi_user
-      POSTGRES_PASSWORD: predi_password
-    ports:
-      - "5433:5432"
+      POSTGRES_DB: ${AUTH_DB_NAME}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_autentificacion_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U predi_user -d autentificacion_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${AUTH_DB_NAME}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -62,16 +55,17 @@ services:
     build: ./ms-analitica/
     container_name: predistock-ms-analitica
     restart: unless-stopped
-    ports:
-      - "5000:5000"
+    expose:
+      - "5000"
     environment:
-      - DATABASE_URL=postgresql://predi_user:predi_password@analitica-db:5432/analitica_db
-      - EXISTENCIAS_SERVICE_URL=http://ms-existencias:8002/api/existencias
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@analitica-db:5432/${ANALYTICS_DB_NAME}
+      - EXISTENCIAS_SERVICE_URL=http://api-gateway:8000/api
+      - JWT_SECRET=${JWT_SECRET}
       - MODELS_STORAGE_PATH=/app/models
       - FLASK_ENV=development
     volumes:
       - ./ms-analitica:/app
-      - ./models_storage:/app/models # Persistencia de modelos en el host (RNFM_02)
+      - ./models_storage:/app/models
     depends_on:
       analitica-db:
         condition: service_healthy
@@ -80,15 +74,13 @@ services:
     image: postgres:15-alpine
     container_name: predistock-analitica-db
     environment:
-      POSTGRES_DB: analitica_db
-      POSTGRES_USER: predi_user
-      POSTGRES_PASSWORD: predi_password
-    ports:
-      - "5434:5432" # Puerto 5434 hacia el host para no colisionar con otros Postgres
+      POSTGRES_DB: ${ANALYTICS_DB_NAME}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_analitica_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U predi_user -d analitica_db"]
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${ANALYTICS_DB_NAME}"]
       interval: 5s
       timeout: 5s
       retries: 5
@@ -201,6 +193,17 @@ services:
   # SEEDERS (datos de demostración). Servicios de un solo uso: arrancan, siembran y terminan.
   # Son idempotentes, así que pueden correr en cada "docker compose up" sin duplicar datos.
   # Mismo comando en Windows, Linux y Kubernetes (allí serían Jobs con la misma imagen).
+
+  seed-usuarios:
+    build: ./ms-usuarios
+    container_name: predistock-seed-usuarios
+    command: node seed.js
+    restart: "no"
+    environment:
+      - DATABASE_URL=postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@autentificacion-db:5432/${AUTH_DB_NAME}
+    depends_on:
+      autentificacion-db:
+        condition: service_healthy
   seed-catalogo:
     build: ./ms-catalogo
     container_name: predistock-seed-catalogo
@@ -239,9 +242,22 @@ services:
       args:
         - VITE_GATEWAY_URL=http://localhost:8000/api
     container_name: predistock-frontend
-    restart: unless-stopped
     ports:
       - "5173:80"
+    depends_on:
+      - api-gateway
+
+  # LOCUST: Pruebas de rendimiento bajo demanda (Puerto 8089)
+  locust:
+    build: ./performance-tests
+    container_name: predistock-locust
+    profiles: ["testing"]
+    ports:
+      - "8089:8089"
+    environment:
+      - LOCUST_HOST=http://api-gateway:8000
+    volumes:
+      - ./performance-tests:/locust
     depends_on:
       - api-gateway
 

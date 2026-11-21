@@ -50,9 +50,8 @@ $existenciasUrl = env('EXISTENCIAS_SERVICE_URL', 'http://ms-existencias:8002');
 $analyticsUrl   = env('ANALYTICS_SERVICE_URL', 'http://ms-analitica:5000');
 $notifUrl       = env('NOTIFICACIONES_SERVICE_URL', 'http://ms-notificaciones:5001');
 
-// =========================================================================
 // 1. ms-usuarios: Rutas Públicas (Token: No | Roles: Público)
-// =========================================================================
+
 Route::post('/usuarios/auth/login', fn(Request $r) => forwardToService($r, $usersUrl, '/api/usuarios/auth/login'));
 Route::post('/auth/login', fn(Request $r) => forwardToService($r, $usersUrl, '/api/usuarios/auth/login'));
 
@@ -62,10 +61,7 @@ Route::post('/usuarios/auth/recuperar-password', fn(Request $r) => forwardToServ
 Route::post('/auth/restablecer-password', fn(Request $r) => forwardToService($r, $usersUrl, '/auth/restablecer-password'));
 Route::post('/usuarios/auth/restablecer-password', fn(Request $r) => forwardToService($r, $usersUrl, '/auth/restablecer-password'));
 
-// =========================================================================
 // 2. Rutas Protegidas por JWT
-// =========================================================================
-
 // --- A. Roles: Todos ---
 Route::middleware('jwt.auth')->group(function () use ($usersUrl, $catalogoUrl, $existenciasUrl, $notifUrl) {
     Route::match(['GET', 'PUT', 'POST'], '/usuarios/auth/me', fn(Request $r) => forwardToService($r, $usersUrl, '/auth/me'));
@@ -76,6 +72,7 @@ Route::middleware('jwt.auth')->group(function () use ($usersUrl, $catalogoUrl, $
 
     Route::get('/catalogo/{path?}', fn(Request $r, $path = '') => forwardToService($r, $catalogoUrl, '/api/catalogo/' . $path))->where('path', '.*');
     Route::get('/existencias/{path?}', fn(Request $r, $path = '') => forwardToService($r, $existenciasUrl, '/api/existencias/' . $path))->where('path', '.*');
+    Route::get('/notifications', fn() => response()->json([]));
     Route::any('/notifications/{path?}', fn(Request $r, $path = '') => forwardToService($r, $notifUrl, '/api/notifications/' . $path))->where('path', '.*');
 });
 
@@ -103,9 +100,7 @@ Route::middleware('jwt.auth:ADMIN')->group(function () use ($usersUrl, $catalogo
     Route::match(['POST', 'PUT', 'PATCH'], '/existencias/{path?}', fn(Request $r, $path = '') => forwardToService($r, $existenciasUrl, '/api/existencias/' . $path))->where('path', '.*');
 });
 
-// =========================================================================
 // Error 404: La ruta no corresponde a ningún microservicio
-// =========================================================================
 Route::fallback(function () {
     return response()->json([
         'error' => 'La ruta no corresponde a ningún microservicio'

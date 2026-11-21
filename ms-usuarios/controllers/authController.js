@@ -3,7 +3,10 @@ const jwt = require('jsonwebtoken');
 const crypto = require('crypto');
 const { pool } = require('../config/db');
 
-const JWT_SECRET = process.env.JWT_SECRET || 'password_2026';
+const JWT_SECRET = process.env.JWT_SECRET;
+if (!JWT_SECRET) {
+  throw new Error('La variable de entorno JWT_SECRET es obligatoria.');
+}
 
 // RF08: Login
 const login = async (req, res) => {

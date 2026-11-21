@@ -58,7 +58,10 @@ class JwtAuthenticate
             [$headerB64, $payloadB64, $signatureB64] = $parts;
 
             // 1. Validar firma criptográfica HMAC-SHA256 en memoria
-            $secret = env('JWT_SECRET', 'password_2026');
+            $secret = env('JWT_SECRET');
+            if (!$secret) {
+                throw new \Exception('JWT_SECRET no configurado en el Gateway.');
+            }
             $expectedSignature = $this->base64UrlEncode(
                 hash_hmac('sha256', "$headerB64.$payloadB64", $secret, true)
             );
@@ -73,9 +76,9 @@ class JwtAuthenticate
                 throw new \Exception('Payload corrupto.');
             }
 
-            // 3. Validar expiración (exp)
-            if (isset($payload['exp']) && time() >= (int) $payload['exp']) {
-                throw new \Exception('Token vencido.');
+            // 3. Validar expiración obligatoria (exp)
+            if (!isset($payload['exp']) || time() >= (int) $payload['exp']) {
+                throw new \Exception('Token sin expiración o vencido.');
             }
 
             // 4. Normalizar rol del usuario
