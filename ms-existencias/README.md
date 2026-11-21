@@ -99,3 +99,19 @@ Son 98 pruebas: bodegas, stock, movimientos (saldo, lotes FEFO, permisos, alerta
 ## Diferencias respecto al contrato original
 
 El contrato de la Entrega 2 se actualizó con estos puntos que surgieron al implementar: `GET /health`, `GET /movimientos/historico`, las cabeceras `X-Total-Count` y `X-Movimientos-Ids`, y que el reporte de existencias no falla (`503`) si catálogo está caído. Las capturas de `docs/Contratos_api/` corresponden a la versión anterior del contrato.
+
+
+## Datos de demostración (seeder)
+
+Para tener datos con los que consultar el dashboard y alimentar a ms-analitica (requiere haber sembrado antes el catálogo con `seed_catalogo`):
+
+```bash
+docker compose exec ms-existencias python manage.py seed_existencias --confirmo
+```
+
+Crea 3 bodegas (`SEED-B1`..`SEED-B3`), 30 series producto-bodega con 12 meses de kardex (unas 2.000 salidas con estacionalidad y sus reposiciones), 4 órdenes de compra (pendiente, parcial, recibida y cancelada), 2 traslados, 2 devoluciones, lotes de perecederos (incluido uno próximo a vencer y uno vencido) y un estado final con 6 series en quiebre, 6 en sobrestock y el resto en nivel óptimo. Además provoca una alerta real de stock bajo.
+
+- Todo pasa por los endpoints reales (mismas reglas de kardex, FEFO y alertas); lo único que se escribe directamente es la fecha de cada registro, porque la API no acepta fechas pasadas.
+- Sin `--confirmo` solo describe lo que haría. `--hasta AAAA-MM-DD` cierra el histórico en esa fecha (por defecto, ayer).
+- Los movimientos no se pueden borrar, así que el comando se detiene si ya hay movimientos. Para repetir la siembra hay que recrear el volumen de la base de existencias.
+- En `docker-compose.yml` lo ejecuta automáticamente el servicio de un solo uso `seed-existencias` (con `--solo-si-vacio`, que no hace nada si ya hay datos), después de `seed-catalogo`. Con un simple `docker compose up -d --build` el sistema queda con datos, sin scripts propios de un sistema operativo. En Kubernetes serían Jobs con esta misma imagen y comando.

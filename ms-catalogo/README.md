@@ -88,3 +88,14 @@ docker compose exec ms-catalogo python manage.py test catalogo
 ```
 
 Son 122 pruebas: productos (alta, edición, baja, reactivación, filtros, paginación y detalle que consume existencias), categorías (jerarquía, ciclos, baja, reactivación), proveedores, asociación producto-proveedor (alta, cambio de precio y de principal, borrado), unidades de medida, restricciones de unicidad en la base de datos, permisos por rol y formato de errores.
+
+
+## Datos de demostración (seeder)
+
+La base arranca vacía. Para cargar un catálogo de demostración (3 unidades, 7 categorías, 4 proveedores y 10 productos `PRD-001`..`PRD-010`):
+
+```bash
+docker compose exec ms-catalogo python manage.py seed_catalogo --confirmo
+```
+
+Sin `--confirmo` solo describe lo que haría. El comando usa los endpoints reales del servicio (mismas validaciones) y es idempotente: lo que ya existe se reutiliza. En `docker-compose.yml` lo ejecuta automáticamente el servicio de un solo uso `seed-catalogo` en cada arranque, y el seeder de existencias espera a que termine (existencias necesita estos productos). El comando es el mismo en Windows, Linux y Kubernetes.
