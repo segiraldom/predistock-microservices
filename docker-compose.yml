@@ -116,8 +116,10 @@ services:
       POSTGRES_DB: catalogo_db
       POSTGRES_USER: predi_user
       POSTGRES_PASSWORD: predi_password
-    ports:
-      - "5436:5432" # Puerto 5436 hacia el host para no colisionar con los otros Postgres
+    # Sin "ports": la base solo la usa ms-catalogo por la red interna.
+    # Para inspeccionarla en desarrollo, agregar temporalmente: ports: ["5436:5432"]
+    expose:
+      - "5432"
     volumes:
       - postgres_catalogo_data:/var/lib/postgresql/data
     healthcheck:
@@ -162,8 +164,10 @@ services:
       POSTGRES_DB: existencias_db
       POSTGRES_USER: predi_user
       POSTGRES_PASSWORD: predi_password
-    ports:
-      - "5435:5432" # Puerto 5435 hacia el host para no colisionar con los otros Postgres
+    # Sin "ports": la base solo la usa ms-existencias por la red interna.
+    # Para inspeccionarla en desarrollo, agregar temporalmente: ports: ["5435:5432"]
+    expose:
+      - "5432"
     volumes:
       - postgres_existencias_data:/var/lib/postgresql/data
     healthcheck:
